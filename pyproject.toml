@@ -7,6 +7,10 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.9"
+sentry-sdk = "^2.14.0"
+boto3 = "^1.35.16"
+rgwadmin = "^2.4.5"
+pika = "^1.3.2"
 
 [tool.poetry.scripts]
 s3ben = 's3ben.cli:main'

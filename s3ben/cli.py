@@ -7,7 +7,6 @@ from s3ben.config import parse_config
 from s3ben.rabbit import setup_rabbit
 from logging import getLogger
 
-
 _logger = getLogger(__name__)
 args = base_args()
 subparser = args.add_subparsers(dest="subcommand")
@@ -49,4 +48,4 @@ def setup(config: dict) -> None:
     s3["mq_routing_key"] = amqp["routing_key"]
     s3["mq_port"] = amqp["port"]
     setup_rabbit(**amqp)
-    setup_buckets(**s3)
+    # setup_buckets(**s3)

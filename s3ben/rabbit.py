@@ -1,15 +1,16 @@
 import pika
 import functools
 import json
+import os
 from logging import getLogger
-from pika.exchange_type import ExchangeType
+from s3ben.s3 import S3Events
 
 _logger = getLogger(__name__)
 
 
-class Amqp():
+class RabbitMQ():
     """
-    Class to setup amqp (rabbit)
+    Class to setup and consume rabbitmq cluster
     :param str hostname: rabbitmq server address
     :param str user: username for connection
     :param str password: password for user
@@ -17,25 +18,46 @@ class Amqp():
     :param str virtualhost: virtual host to connect, default: /
     """
 
-    EXCHANGE = 'message'
-    EXCHANGE_TYPE = ExchangeType.topic
-    QUEUE = 'text'
-    ROUTING_KEY = 'example.text'
-
-    def __init__(self, hostname: str, user: str, password: str, port: int, virtualhost: str) -> None:
+    def __init__(
+            self,
+            hostname: str,
+            user: str,
+            password: str,
+            port: int,
+            virtualhost: str) -> None:
         mq_credentials = pika.credentials.PlainCredentials(user, password)
         self.mq_params = pika.ConnectionParameters(host=hostname, port=port, virtual_host=virtualhost, credentials=mq_credentials)
         self.should_reconnect: bool = False
         self.was_consuming = False
 
-        self._connection: pika.connection.Connection = None
+        self._connection: pika.SelectConnection = None
         self._channel: pika.channel.Channel = None
         self._consuming: bool = False
         self._closing: bool = False
         self._consumer_tag = None
         self._prefetch_count = 1
+        self._s3_client: S3Events = None
+        self._exchange: str = None
+        self._queue: str = None
+        self._routing_key: str = None
 
-    def connect(self) -> None:
+    def prepare(self, exchange: str, queue: str, routing_key: str) -> None:
+        """
+        Method to prepare rabbitmq cluster for consumer
+        :param str exchange: Exchange to create
+        :param str queue: queue to create
+        :param str routing_key: bind queu to exchange ussing routing key
+        """
+        _logger.info("Preparing rabbitmq cluster for work")
+        connection = pika.BlockingConnection(parameters=self.mq_params)
+        self._channel = connection.channel()
+        self.setup_exchange(exchange=exchange)
+        self.setup_queue(queue=queue)
+        self.quene_bind(routing_key=routing_key)
+        self.close_channel()
+        connection.close()
+
+    def consume(self, queue: str, s3_client: S3Events) -> None:
         """
         This method connects to RabbitMQ, returning the connection handle.
         When the connection is established, the on_connection_open method
@@ -44,6 +66,8 @@ class Amqp():
         :rtype: pika.SelectConnection
         """
         _logger.info("Connecting to MQ")
+        self._s3_client = s3_client
+        self._queue = queue
         self._connection = pika.SelectConnection(
                 parameters=self.mq_params,
                 on_open_callback=self.on_connection_open,
@@ -81,7 +105,7 @@ class Amqp():
         _logger.debug("Channel opened")
         self._channel = channel
         self.add_on_channel_close_callback()
-        self.setup_exchange(self.EXCHANGE)
+        self.start_consuming()
 
     def add_on_channel_close_callback(self) -> None:
         """
@@ -153,6 +177,7 @@ class Amqp():
             self._closing = True
             _logger.info("Stopping")
             if self._consuming:
+                _logger.debug("still consuming")
                 self.stop_consuming()
                 self._connection.ioloop.start()
             else:
@@ -225,80 +250,40 @@ class Amqp():
     def setup_queue(self, queue) -> None:
         """
         Setup the queue on RabbitMQ by invoking the Queue.Declare RPC
-        command. When it is complete, the on_queue_declareok method will
-        be invoked by pika.
+        command.
 
         :param str|unicode queue_name: The name of the queue to declare.
         """
         _logger.debug(f"Creating queue: {queue}")
-        callback = functools.partial(self.on_queue_declareok, userdata=queue)
+        self._queue = queue
         self._channel.queue_declare(
-                queue=queue,
+                queue=self._queue,
                 durable=True,
                 auto_delete=False,
-                arguments={"x-queue-type": "quorum"},
-                callback=callback)
+                arguments={"x-queue-type": "quorum"})
 
-    def on_queue_declareok(self, _unused_frame, userdata) -> None:
-        """
-        Method invoked by pika when the Queue.Declare RPC call made in
-        setup_queue has completed. In this method we will bind the queue
-        and exchange together with the routing key by issuing the Queue.Bind
-        RPC command. When this command is complete, the on_bindok method will
-        be invoked by pika.
-
-        :param pika.frame.Method _unused_frame: The Queue.DeclareOk frame
-        :param str|unicode userdata: Extra user data (queue name)
-
-        """
-        queue = userdata
-        _logger.debug(f"Binding {self.EXCHANGE} to {queue} with {self.ROUTING_KEY}")
-        callback = functools.partial(self.on_bindok, userdata=queue)
+    def quene_bind(self, routing_key: str) -> None:
+        _logger.debug(f"Binding {self._exchange} to {self._queue} with {routing_key}")
         self._channel.queue_bind(
-                queue=queue,
-                exchange=self.EXCHANGE,
-                routing_key=self.ROUTING_KEY,
-                callback=callback)
-
-    def on_bindok(self, _unused_frame, userdata) -> None:
-        """
-        Invoked by pika when the Queue.Bind method has completed. At this
-        point we will set the prefetch count for the channel.
-
-        :param pika.frame.Method _unused_frame: The Queue.BindOk response frame
-        :param str|unicode userdata: Extra user data (queue name)
-        """
-        _logger.debug(f"queue bound: {userdata}")
-        self.start_consuming()
+                queue=self._queue,
+                exchange=self._exchange,
+                routing_key=routing_key)
 
     def setup_exchange(self, exchange) -> None:
         """
         Setup the exchange on RabbitMQ by invoking the Exchange.Declare RPC
-        command. When it is complete, the on_exchange_declareok method will
-        be invoked by pika.
+        command.
 
         :param str|unicode exchange_name: The name of the exchange to declare
         """
         _logger.debug(f"Declaring exhange {exchange}")
-        callback = functools.partial(self.on_exchange_declareok, userdata=exchange)
+        self._exchange = exchange
         self._channel.exchange_declare(
-                exchange=exchange,
+                exchange=self._exchange,
                 durable=True,
                 exchange_type="direct",
                 auto_delete=False,
-                internal=False,
-                callback=callback)
-
-    def on_exchange_declareok(self, _unused_frame, userdata) -> None:
-        """
-        Invoked by pika when RabbitMQ has finished the Exchange.Declare RPC
-        command.
-
-        :param pika.Frame.Method unused_frame: Exchange.DeclareOk response frame
-        :param str|unicode userdata: Extra user data (exchange name)
-        """
-        _logger.debug(f"Exhange declared: {userdata}")
-        self.setup_queue(self.QUEUE)
+                internal=False)
 
     def start_consuming(self) -> None:
         """This method sets up the consumer by first calling
@@ -311,7 +296,7 @@ class Amqp():
         """
         _logger.info("Starting to consume messages")
         self.add_on_cancel_callback()
-        self._consumer_tag = self._channel.basic_consume(self.QUEUE, self.on_message)
+        self._consumer_tag = self._channel.basic_consume(self._queue, self.on_message)
 
     def add_on_cancel_callback(self) -> None:
         """
@@ -348,7 +333,6 @@ class Amqp():
         :param bytes body: The message body
         """
         body = json.loads(body.decode())
-        _logger.debug(f"Received message;\n{basic_deliver.delivery_tag}, {properties.app_id}\n{json.dumps(body, indent=2)}")
         for record in body["Records"]:
             obj_size = record["s3"]["object"]["size"]
             if obj_size == 0:
@@ -356,8 +340,23 @@ class Amqp():
             event = record["eventName"]
             bucket = record["s3"]["bucket"]["name"]
             obj_key = record["s3"]["object"]["key"]
-            _logger.info(f"Bucket: {bucket} event: {event} file: {obj_key} size: {obj_size}")
+            _logger.debug(f"Bucket: {bucket} event: {event} file: {obj_key} size: {obj_size}")
+            action = event.split(":")[0]
+            if action == "ObjectCreated":
+                self._s3_client.download_object(bucket=bucket, path=obj_key)
+            if action == "ObjectRemoved":
+                _logger.info(f"Removing: {obj_key}, bucket: {bucket}")
+                src = os.path.join(bucket, obj_key)
+                if not os.path.exists(src):
+                    _logger.warning(f"file {src} doens't exists")
+                    continue
+                self._remove(path=os.path.join(bucket, obj_key))
+            if action == "ObjectLifecycle":
+                _logger.info("Lifecycle expired")
         self.acknowledge_message(basic_deliver.delivery_tag)
+
+    def _remove(self, path) -> None:
+        self._s3_client.remove_object(path=path)
 
     def acknowledge_message(self, delivery_tag) -> None:
         """
@@ -366,42 +365,5 @@ class Amqp():
 
         :param int delivery_tag: The delivery tag from the Basic.Deliver frame
         """
-        _logger.info(f"Ack message: {delivery_tag}")
+        _logger.debug(f"Ack message: {delivery_tag}")
         self._channel.basic_ack(delivery_tag)
-
-
-def setup_rabbit(
-        host: str,
-        user: str,
-        password: str,
-        exchange: str,
-        queue: str,
-        routing_key: str,
-        port: int = 5672,
-        virtualhost: str = "/") -> None:
-    """
-    Function to setup rabbitmq
-    :param str hostname: rabbitmq address
-    :param str user: username for connection string
-    :param str password: password for provided username
-    :param str exchange: exchange to declare
-    :param str queue: queue to declare
-    :param str routing_key: routing key which routes from exchange to queue
-    :param int port: port which to connect, default: 5672
-    :param str virtualhost: rabbitmq virtualhos, default /
-    :return: None
-    """
-    _logger.debug("Running rabbit setup")
-    mq = Amqp(
-            hostname=host,
-            user=user,
-            password=password,
-            port=port,
-            virtualhost=virtualhost)
-    mq.QUEUE = queue
-    mq.EXCHANGE = exchange
-    mq.ROUTING_KEY = routing_key
-    try:
-        mq.connect()
-    except KeyboardInterrupt:
-        mq.stop()

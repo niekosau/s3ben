@@ -1,6 +1,7 @@
 import boto3
-import json
-from botocore.client import Config
+import os
+import botocore
+import shutil
 from s3ben.constants import TOPIC_ARN, NOTIFICATION_EVENTS, AMQP_HOST
 from rgwadmin import RGWAdmin
 from logging import getLogger
@@ -8,7 +9,7 @@ from logging import getLogger
 _logger = getLogger(__name__)
 
 
-class BucketNotificationConfig():
+class S3Events():
     """
     Class for configuring or showing config of the bucket
     :param str secret_key: Secret key fro s3
@@ -21,7 +22,10 @@ class BucketNotificationConfig():
             secret_key: str,
             access_key: str,
             hostname: str,
-            secure: bool) -> None:
+            secure: bool,
+            backup_root: str = None) -> None:
+        self._download = os.path.join(backup_root, "active") if backup_root else None
+        self._remove = os.path.join(backup_root, "deleted") if backup_root else None
         protocol = "https" if secure else "http"
         endpoint = f"{protocol}://{hostname}"
         self.client_s3 = boto3.client(
@@ -37,7 +41,7 @@ class BucketNotificationConfig():
                 endpoint_url=endpoint,
                 aws_access_key_id=access_key,
                 aws_secret_access_key=secret_key,
-                config=Config(signature_version='s3'))
+                config=botocore.client.Config(signature_version='s3'))
         self.client_admin = RGWAdmin(
                 access_key=access_key,
                 secret_key=secret_key,
@@ -76,15 +80,16 @@ class BucketNotificationConfig():
                 }
         self.client_sns.create_topic(Name=exchange, Attributes=attributes)
 
-    def create_notification(self, bucket: str, name: str) -> None:
+    def create_notification(self, bucket: str, exchange: str) -> None:
         """
         Create buclet notification config
         :param str bucket: Bucket name
+        :param str exchange: Exchange name were to send notification
         """
         notification_config = {
                 'TopicConfigurations': [{
-                    'Id': name,
-                    'TopicArn': TOPIC_ARN.format(name),
+                    'Id': f"s3ben-{exchange}",
+                    'TopicArn': TOPIC_ARN.format(exchange),
                     'Events': NOTIFICATION_EVENTS
                     }]
                 }
@@ -100,35 +105,25 @@ class BucketNotificationConfig():
         """
         return self.client_admin.get_buckets()
 
+    def download_object(self, bucket: str, path: str):
+        """
+        Get an object from a bucket
 
-def setup_buckets(
-        hostname: str,
-        access_key: str,
-        secret_key: str,
-        exclude: list,
-        mq_host: str,
-        mq_user: str,
-        mq_password: str,
-        mq_exchange: str,
-        mq_routing_key: str,
-        mq_port: int,
-        secure: bool
-        ) -> None:
-    add_config = BucketNotificationConfig(
-            hostname=hostname,
-            access_key=access_key,
-            secret_key=secret_key,
-            secure=secure)
-    buckets = add_config.get_admin_buckets()
-    exclude = exclude.split(",")
-    exclude = [i.strip() for i in exclude]
-    _logger.debug("Creating topic")
-    add_config.create_topic(
-            mq_host=mq_host,
-            mq_user=mq_user,
-            mq_password=mq_password,
-            exchange=mq_exchange,
-            mq_port=mq_port)
-    for bucket in list(set(buckets) - set(exclude)):
-        _logger.debug(f"Adding bucket config to: {bucket}")
-        add_config.create_notification(bucket=bucket, name=mq_exchange)
+        :param str bucket: Bucket name from which to get object
+        :param str path: object path
+        """
+        _logger.info(f"Downloading {path} from {bucket}")
+        destination = os.path.join(self._download, bucket, path)
+        dir = os.path.dirname(destination)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
+        _logger.debug(f"bucket: {bucket}, obj: {path}, dest: {destination}")
+        self.client_s3.download_file(Bucket=bucket, Key=path, Filename=destination)
+
+    def remove_object(self, path: str) -> None:
+        _logger.debug(f"Moving {path} to deleted items")
+        dest = os.path.dirname(os.path.join(self._remove, path))
+        src = os.path.join(self._download, path)
+        if not os.path.exists(dest):
+            os.makedirs(dest)
+        shutil.move(src, dest)

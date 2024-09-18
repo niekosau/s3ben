@@ -112,17 +112,19 @@ class S3Events():
         :param str bucket: Bucket name from which to get object
         :param str path: object path
         """
-        _logger.info(f"Downloading {path} from {bucket}")
         destination = os.path.join(self._download, bucket, path)
         dir = os.path.dirname(destination)
         if not os.path.exists(dir):
             os.makedirs(dir)
         _logger.debug(f"bucket: {bucket}, obj: {path}, dest: {destination}")
-        head = self.client_s3.head_object(Bucket=bucket, Key=path)
-        if head["ResponseMetadata"]["HTTPStatusCode"] == 404:
-            _logger.warning(f"{path} not found in bucket: {bucket}")
-            return
-        self.client_s3.download_file(Bucket=bucket, Key=path, Filename=destination)
+        try:
+            self.client_s3.head_object(Bucket=bucket, Key=path)
+        except botocore.exceptions.ClientError as err:
+            if err.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
+                _logger.warning(f"{path} not found in bucket: {bucket}")
+        else:
+            _logger.info(f"Downloading {path} from {bucket}")
+            self.client_s3.download_file(Bucket=bucket, Key=path, Filename=destination)
 
     def remove_object(self, bucket: str, path: str) -> None:
         """

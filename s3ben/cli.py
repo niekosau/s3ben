@@ -1,3 +1,5 @@
+import os
+import pwd
 from s3ben.logger import init_logger
 from s3ben.sentry import init_sentry
 from s3ben.decorators import command
@@ -38,6 +40,13 @@ def setup(config: dict) -> None:
     :param dict config: Parsed configuration dictionary
     :return: None
     """
+    _logger.info("Checking backup root")
+    main: dict = config.pop("s3ben")
+    backup_root: str = main.pop("backup_root")
+    user = pwd.getpwnam(main.pop("user"))
+    if not os.path.exists(backup_root):
+        os.mkdir(path=backup_root, mode=0o700)
+        os.chown(path=backup_root, uid=user.pw_uid, gid=user.pw_gid)
     _logger.info("Setting up RabitMQ")
     mq_conf: dict = config.pop("amqp")
     exchange = mq_conf.pop("exchange")

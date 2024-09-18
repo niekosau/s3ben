@@ -341,22 +341,32 @@ class RabbitMQ():
             bucket = record["s3"]["bucket"]["name"]
             obj_key = record["s3"]["object"]["key"]
             _logger.debug(f"Bucket: {bucket} event: {event} file: {obj_key} size: {obj_size}")
-            action = event.split(":")[0]
-            if action == "ObjectCreated":
+            action = self.__bucket_event(event=event)
+            if action == "download":
                 self._s3_client.download_object(bucket=bucket, path=obj_key)
-            if action == "ObjectRemoved":
-                _logger.info(f"Removing: {obj_key}, bucket: {bucket}")
-                src = os.path.join(bucket, obj_key)
-                if not os.path.exists(src):
-                    _logger.warning(f"file {src} doens't exists")
-                    continue
-                self._remove(path=os.path.join(bucket, obj_key))
-            if action == "ObjectLifecycle":
-                _logger.info("Lifecycle expired")
+            if action == "remove":
+                self._s3_client.remove_object(bucket=bucket, path=obj_key)
         self.acknowledge_message(basic_deliver.delivery_tag)
 
-    def _remove(self, path) -> None:
-        self._s3_client.remove_object(path=path)
+    def __bucket_event(self, event: str) -> str:
+        """
+        Method to parse bucket event
+        :param str event: Event that was received
+        :raises ValueError: if event unknow
+        :return: Parsed action to execute
+        """
+        e_split = event.split(":")
+        if e_split[0].lower() == "objecsynced" and e_split[1].lower() == "create":
+            return "download"
+        if e_split[0].lower() == "objecsynced" and e_split[1].lower() == "delete":
+            return "remove"
+        if e_split[0].lower() == "objectcreated":
+            return "download"
+        if e_split[0].lower() == "objectremoved":
+            return "remove"
+        if e_split[0].lower() == "objectlifecycle":
+            return "remove"
+        raise ValueError(f"Event: {event} unknow")
 
     def acknowledge_message(self, delivery_tag) -> None:
         """

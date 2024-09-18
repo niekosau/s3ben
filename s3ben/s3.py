@@ -120,10 +120,21 @@ class S3Events():
         _logger.debug(f"bucket: {bucket}, obj: {path}, dest: {destination}")
         self.client_s3.download_file(Bucket=bucket, Key=path, Filename=destination)
 
-    def remove_object(self, path: str) -> None:
-        _logger.debug(f"Moving {path} to deleted items")
-        dest = os.path.dirname(os.path.join(self._remove, path))
-        src = os.path.join(self._download, path)
+    def remove_object(self, bucket: str, path: str) -> None:
+        """
+        Move object to deleted items
+        :param str bucket: Bucket eame
+        :param str path: object path which should be moved
+        :return: None
+        """
+        _logger.info(f"Moving {path} to deleted items for bucket: {bucket}")
+        dest = os.path.dirname(os.path.join(self._remove, bucket, path))
+        src = os.path.join(self._download, bucket, path)
+        file_name = os.path.basename(path)
+        d_file = os.path.join(dest, file_name)
         if not os.path.exists(dest):
             os.makedirs(dest)
+        if os.path.isfile(d_file):
+            _logger.warning(f"Removing {d_file} as another with same name must be moved to deleted items")
+            os.remove(d_file)
         shutil.move(src, dest)

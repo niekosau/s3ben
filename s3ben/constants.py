@@ -7,7 +7,9 @@ MANDATORY_CONFIG_KEYS = [
         "aws_access_key"]
 TOPIC_ARN = "arn:aws:sns:default::{0}"
 NOTIFICATION_EVENTS = [
-        's3:ObjectCreated:*',
-        's3:ObjectRemoved:*',
-        's3:ObjectLifecycle:Expiration:*']
+        "s3:ObjectCreated:*",
+        "s3:ObjectRemoved:*",
+        "s3:ObjectLifecycle:Expiration:*",
+        "s3:ObjectSynced:Create",
+        "s3:ObjectSynced:Delete"]
 AMQP_HOST = "amqp://{user}:{password}@{host}:{port}"

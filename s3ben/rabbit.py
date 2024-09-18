@@ -356,9 +356,9 @@ class RabbitMQ():
         :return: Parsed action to execute
         """
         e_split = event.split(":")
-        if e_split[0].lower() == "objecsynced" and e_split[1].lower() == "create":
+        if e_split[0].lower() == "objectsynced" and e_split[1].lower() == "create":
             return "download"
-        if e_split[0].lower() == "objecsynced" and e_split[1].lower() == "delete":
+        if e_split[0].lower() == "objectsynced" and e_split[1].lower() == "delete":
             return "remove"
         if e_split[0].lower() == "objectcreated":
             return "download"

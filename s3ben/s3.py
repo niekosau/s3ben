@@ -65,13 +65,14 @@ class S3Events():
             mq_user: str,
             mq_password: str,
             exchange: str,
-            mq_port: int) -> None:
+            mq_port: int,
+            mq_virtualhost: str) -> None:
         """
         Create bucket event notification config
         :param str bucket: Bucket name for config update
         :param str amqp: rabbitmq address
         """
-        amqp = AMQP_HOST.format(user=mq_user, password=mq_password, host=mq_host, port=mq_port)
+        amqp = AMQP_HOST.format(user=mq_user, password=mq_password, host=mq_host, port=mq_port, virtualhost=mq_virtualhost)
         attributes = {
                 "push-endpoint": amqp,
                 "amqp-exchange": exchange,

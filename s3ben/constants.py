@@ -1,5 +1,6 @@
 DEFAULT_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-DEFAULT_LOG_FORMAT = "[%(asctime)s][%(levelname)-8s]: %(message)s"
+DEFAULT_LOG_FORMAT_DEBUG = "[%(asctime)s][%(levelname)-8s]: %(message)s"
+DEFAULT_LOG_FORMAT = "%(message)s"
 MANDATORY_CONFIG_KEYS = [
         "s3_endpoint",
         "aws_secret_key",

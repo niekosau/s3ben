@@ -2,6 +2,7 @@ import boto3
 import os
 import botocore
 import shutil
+import datetime
 from s3ben.constants import TOPIC_ARN, NOTIFICATION_EVENTS, AMQP_HOST
 from rgwadmin import RGWAdmin
 from logging import getLogger
@@ -135,7 +136,8 @@ class S3Events():
         :return: None
         """
         _logger.info(f"Moving {path} to deleted items for bucket: {bucket}")
-        dest = os.path.dirname(os.path.join(self._remove, bucket, path))
+        current_date = datetime.date.today().strftime("%Y-%m-%d")
+        dest = os.path.dirname(os.path.join(self._remove, current_date, bucket, path))
         src = os.path.join(self._download, bucket, path)
         file_name = os.path.basename(path)
         d_file = os.path.join(dest, file_name)

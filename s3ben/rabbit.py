@@ -105,7 +105,7 @@ class RabbitMQ():
         _logger.debug("Channel opened")
         self._channel = channel
         self.add_on_channel_close_callback()
-        self.start_consuming()
+        self.set_qos()
 
     def add_on_channel_close_callback(self) -> None:
         """
@@ -297,6 +297,8 @@ class RabbitMQ():
         _logger.info("Starting to consume messages")
         self.add_on_cancel_callback()
         self._consumer_tag = self._channel.basic_consume(self._queue, self.on_message)
+        self.was_consuming = True
+        self._consuming = True
 
     def add_on_cancel_callback(self) -> None:
         """
@@ -377,3 +379,25 @@ class RabbitMQ():
         """
         _logger.debug(f"Ack message: {delivery_tag}")
         self._channel.basic_ack(delivery_tag)
+
+    def on_basic_qos_ok(self, _unused_frame):
+        """Invoked by pika when the Basic.QoS method has completed. At this
+        point we will start consuming messages by calling start_consuming
+        which will invoke the needed RPC commands to start the process.
+
+        :param pika.frame.Method _unused_frame: The Basic.QosOk response frame
+
+        """
+        _logger.info('QOS set to: %d', self._prefetch_count)
+        self.start_consuming()
+
+    def set_qos(self):
+        """This method sets up the consumer prefetch to only be delivered
+        one message at a time. The consumer must acknowledge this message
+        before RabbitMQ will deliver another one. You should experiment
+        with different prefetch values to achieve desired performance.
+
+        """
+        _logger.debug(f"Setting prefetch: {self._prefetch_count}")
+        self._channel.basic_qos(
+            prefetch_count=self._prefetch_count, callback=self.on_basic_qos_ok)

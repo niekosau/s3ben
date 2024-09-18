@@ -11,7 +11,7 @@ def base_args() -> argparse.ArgumentParser:
     args.add_argument(
             "--config",
             help="Base config path, default: %(default)s",
-            default="/etc/s3ben.conf",
+            default="/etc/s3ben/s3ben.ini",
             type=Path)
     logging = args.add_argument_group(title="Logging options")
     logging.add_argument(
@@ -21,5 +21,6 @@ def base_args() -> argparse.ArgumentParser:
     logging.add_argument(
             "--sentry-conf",
             type=Path,
-            help="Path to sentry config file")
+            default="/etc/s3ben/sentry.ini",
+            help="Path to sentry config file, default: %(default)s")
     return args

@@ -56,12 +56,13 @@ def setup(config: dict) -> None:
     mq_user = mq_conf.pop("user")
     mq_pass = mq_conf.pop("password")
     mq_port = mq_conf.pop("port")
+    mq_virtualhost = mq_conf.pop("virtualhost")
     mq = RabbitMQ(
             hostname=mq_host,
             user=mq_user,
             password=mq_pass,
             port=mq_port,
-            virtualhost=mq_conf.get("virtualhost"))
+            virtualhost=mq_virtualhost)
     mq.prepare(exchange=exchange, queue=queue, routing_key=routing_key)
     _logger.info("Setting up S3")
     s3 = config.pop("s3")
@@ -79,7 +80,8 @@ def setup(config: dict) -> None:
             mq_user=mq_user,
             mq_port=mq_port,
             mq_password=mq_pass,
-            exchange=exchange)
+            exchange=exchange,
+            mq_virtualhost=mq_virtualhost)
     for bucket in filtered_buckets:
         _logger.debug(f"Setting up bucket: {bucket}")
         s3_events.create_notification(bucket=bucket, exchange=exchange)

@@ -7,4 +7,4 @@ run:
 
 clean:
 	for b in `radosgw-admin bucket list | jq -r .[]`; do radosgw-admin notification rm --bucket $$b; done
-	radosgw-admin topic rm --topic backup
+	radosgw-admin topic rm --topic s3ben-exchange

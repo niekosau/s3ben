@@ -12,4 +12,4 @@ NOTIFICATION_EVENTS = [
         "s3:ObjectLifecycle:Expiration:*",
         "s3:ObjectSynced:Create",
         "s3:ObjectSynced:Delete"]
-AMQP_HOST = "amqp://{user}:{password}@{host}:{port}{virtualhost}"
+AMQP_HOST = "amqp://{user}:{password}@{host}:{port}/{virtualhost}"

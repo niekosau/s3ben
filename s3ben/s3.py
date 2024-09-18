@@ -1,4 +1,5 @@
 import boto3
+import json
 import os
 import botocore
 import shutil
@@ -118,6 +119,10 @@ class S3Events():
         if not os.path.exists(dir):
             os.makedirs(dir)
         _logger.debug(f"bucket: {bucket}, obj: {path}, dest: {destination}")
+        head = self.client_s3.head_object(Bucket=bucket, Key=path)
+        if head["ResponseMetadata"]["HTTPStatusCode"] == 404:
+            _logger.warning(f"{path} not found in bucket: {bucket}")
+            return
         self.client_s3.download_file(Bucket=bucket, Key=path, Filename=destination)
 
     def remove_object(self, bucket: str, path: str) -> None:
@@ -132,6 +137,9 @@ class S3Events():
         src = os.path.join(self._download, bucket, path)
         file_name = os.path.basename(path)
         d_file = os.path.join(dest, file_name)
+        if not os.path.exists(src):
+            _logger.warning(f"{src} doesn't exist")
+            return
         if not os.path.exists(dest):
             os.makedirs(dest)
         if os.path.isfile(d_file):

@@ -28,15 +28,8 @@ class BackupManager():
             mq: RabbitMQ):
         self._backup_root = backup_root
         self._user = user
-        u_details = pwd.getpwnam(self._user)
-        self._uuid = u_details.pw_uid
-        self._guid = u_details.pw_gid
         self._mq = mq
         self._mq_queue = mq_queue
-        if not os.path.exists(self._backup_root):
-            _logger.warning("Creating backup root")
-            os.mkdir(path=self._backup_root, mode=0o700)
-            os.chown(path=self._backup_root, uid=self._uuid, gid=self._guid)
         signal.signal(signal.SIGTERM, self.__exit)
         signal.signal(signal.SIGINT, self.__exit)
 

@@ -1,5 +1,4 @@
 import os
-import pwd
 import signal
 from s3ben.s3 import S3Events
 from s3ben.rabbit import RabbitMQ

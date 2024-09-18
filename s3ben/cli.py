@@ -1,5 +1,6 @@
 import os
 import pwd
+import multiprocessing
 from s3ben.logger import init_logger
 from s3ben.sentry import init_sentry
 from s3ben.decorators import command
@@ -87,8 +88,7 @@ def setup(config: dict) -> None:
         s3_events.create_notification(bucket=bucket, exchange=exchange)
 
 
-@command(parent=subparser)
-def consume(config: dict) -> None:
+def init_consumer(config: dict) -> None:
     main = config.pop("s3ben")
     mq_conf: dict = config.pop("amqp")
     mq_host = mq_conf.pop("host")
@@ -116,3 +116,17 @@ def consume(config: dict) -> None:
             mq=mq,
             mq_queue=queue)
     backup.start_consumer(s3_client=s3_events)
+
+
+@command(parent=subparser)
+def consume(config: dict) -> None:
+    num_proc = config["s3ben"].get("process")
+    processes = []
+    for _ in range(int(num_proc)):
+        process = multiprocessing.Process(target=init_consumer, args=(config,))
+        processes.append(process)
+    for proc in processes:
+        _logger.debug(f"Starting process {proc}")
+        proc.start()
+    for proc in processes:
+        proc.join()

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "s3ben"
-version = "0.1.1a1"
+version = "0.1.1b0"
 description = "S3 bucket backup using notification"
 authors = ["Arunas Grigalionis <arunas.grigalionis@gmail.com>"]
 readme = "README.md"

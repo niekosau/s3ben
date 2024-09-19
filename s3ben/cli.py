@@ -1,9 +1,10 @@
 import os
 import pwd
 import multiprocessing
+from argparse import Namespace
 from s3ben.logger import init_logger
 from s3ben.sentry import init_sentry
-from s3ben.decorators import command
+from s3ben.decorators import command, argument
 from s3ben.arguments import base_args
 from s3ben.s3 import S3Events
 from s3ben.backup import BackupManager
@@ -27,15 +28,15 @@ def main() -> None:
         args.print_help()
         return
     init_logger(name="s3ben", level=parsed_args.log_level)
-    if parsed_args.sentry_conf:
+    if os.path.isfile(parsed_args.sentry_conf):
         _logger.debug("Initializing sentry")
         init_sentry(config=parsed_args.sentry_conf)
     config = parse_config(parsed_args.config)
-    parsed_args.func(config)
+    parsed_args.func(config, parsed_args)
 
 
 @command(parent=subparser)
-def setup(config: dict) -> None:
+def setup(config: dict, args: Namespace) -> None:
     """
     Cli command to add required cofiguration to s3 buckets and mq
     :param dict config: Parsed configuration dictionary
@@ -119,7 +120,7 @@ def init_consumer(config: dict) -> None:
 
 
 @command(parent=subparser)
-def consume(config: dict) -> None:
+def consume(config: dict, args: Namespace) -> None:
     num_proc = config["s3ben"].get("process")
     processes = []
     for _ in range(int(num_proc)):
@@ -130,3 +131,36 @@ def consume(config: dict) -> None:
         proc.start()
     for proc in processes:
         proc.join()
+
+
+@command([
+        argument(
+            "--bucket",
+            required=True,
+            help="Bucket name which to sync",
+            type=str),
+        argument(
+            "--threads",
+            help="Number of threads to start, default: %(default)i",
+            type=int,
+            default=4)
+        ],
+        parent=subparser)
+def sync(config: dict, args: Namespace):
+    """
+    Entry point for sync cli option
+    """
+    _logger.debug("Initializing sync")
+    s3 = config.pop("s3")
+    backup_root = config["s3ben"].pop("backup_root")
+    s3_events = S3Events(
+            hostname=s3.pop("hostname"),
+            access_key=s3.pop("access_key"),
+            secret_key=s3.pop("secret_key"),
+            secure=s3.pop("secure"),
+            backup_root=backup_root)
+    backup = BackupManager(
+            backup_root=backup_root,
+            user=config["s3ben"].pop("user"),
+            s3_client=s3_events)
+    backup.sync_bucket_files(args.bucket, args.threads)

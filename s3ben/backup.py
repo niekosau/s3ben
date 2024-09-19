@@ -23,12 +23,14 @@ class BackupManager():
             self,
             backup_root: str,
             user: str,
-            mq_queue: str,
-            mq: RabbitMQ):
+            mq_queue: str = None,
+            mq: RabbitMQ = None,
+            s3_client: S3Events = None):
         self._backup_root = backup_root
         self._user = user
         self._mq = mq
         self._mq_queue = mq_queue
+        self._s3_client = s3_client
         signal.signal(signal.SIGTERM, self.__exit)
         signal.signal(signal.SIGINT, self.__exit)
 
@@ -50,3 +52,12 @@ class BackupManager():
             self._mq.stop()
         except SystemExit:
             self._mq.stop()
+
+    def sync_bucket_files(self, bucket: str, threads: int) -> None:
+        _logger.info(f"Syncing bucket: {bucket}")
+        # bucket_info = self._s3_client.get_bucket(bucket=bucket)
+        # _logger.debug(json.dumps(bucket_info, indent=2, default=str))
+        self._s3_client.download_all_objects(
+                bucket_name=bucket,
+                dest=self._backup_root,
+                threads=threads)

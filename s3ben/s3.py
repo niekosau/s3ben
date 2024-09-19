@@ -174,7 +174,7 @@ class S3Events():
             os.remove(d_file)
         shutil.move(src, dest)
 
-    def download_all_objects(self, bucket_name: str, dest: str, threads: int) -> None:
+    def download_all_objects(self, bucket_name: str, obj_keys: list) -> None:
         """
         Method for getting all objects from one bucket
         :param str bucket_name: Name of the bucket
@@ -182,40 +182,12 @@ class S3Events():
         :param int threads: Number of threads to start
         :return: None
         """
-        _logger.debug(f"Downloading all objects from {bucket_name}")
-        all_objects = self._get_all_objects(bucket_name)
-        start = time.perf_counter()
-        with multiprocessing.pool.ThreadPool(threads) as proc_pool:
-            iterate = zip(itertools.repeat(bucket_name), all_objects)
-            proc_pool.imap(self._download_object, list(iterate),)
-            proc_pool.close()
-            proc_pool.join()
-        end = time.perf_counter()
-        _logger.debug(f"Download took: {round(end - start, 2)}")
-
-    def _download_object(self, input: tuple) -> None:
-        """
-        Method for downloading objects with multiprocessing threadpool
-        :params touple input: Tuple containing bucket_name and object in bucket
-        :return: none
-        """
-        bucket, path = input
-        destination = os.path.join(self._download, bucket, path)
-        if os.path.isfile(destination):
-            _logger.warning(f"File already exists: {destination}")
-            return
-        dir = os.path.dirname(destination)
-        if not os.path.exists(dir):
-            os.makedirs(dir)
-        _logger.debug(f"bucket: {bucket}, obj: {path}, dest: {destination}")
-        try:
-            self.client_s3.head_object(Bucket=bucket, Key=path)
-        except botocore.exceptions.ClientError as err:
-            if err.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
-                _logger.warning(f"{path} not found in bucket: {bucket}")
-        else:
-            _logger.info(f"Downloading {path} from {bucket}")
-            self.client_s3.download_file(Bucket=bucket, Key=path, Filename=destination)
+        for obj in obj_keys:
+            full_path = os.path.join(self._download, bucket_name, obj)
+            if os.path.isfile(full_path):
+                _logger.warning(f"{obj} already exists, skipping")
+                continue
+            self.download_object(bucket=bucket_name, path=obj)
 
     def _get_all_objects(self, bucket_name) -> list:
         """
@@ -225,21 +197,6 @@ class S3Events():
         """
         objects = self.resouce.Bucket(bucket_name).objects.all()
         return [o.key for o in objects]
-
-    def _create_local_dir_tree(self, paths: list, bucket_name: str) -> None:
-        """
-        Method to replicate local directory tree from provided list
-        :params list paths: List of paths from which we should create directory tree
-        :param str bucket_name: Name of the bucket to be included in path
-        """
-        _logger.debug("Creating local directory tree")
-        uniq_dirs = {os.path.dirname(dir) for dir in paths}
-        for dir in uniq_dirs:
-            full_path = os.path.join(self._download, bucket_name, dir)
-            if os.path.isdir(full_path):
-                continue
-            _logger.debug(f"Creating: {full_path}")
-            os.makedirs(full_path)
 
     def _check_if_object_exists(self, path):
         pass

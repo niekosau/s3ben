@@ -1,6 +1,7 @@
 import os
 import pwd
 import grp
+from typing import List
 
 
 def drop_privileges(user: str) -> None:
@@ -18,3 +19,7 @@ def drop_privileges(user: str) -> None:
     os.setgid(new_user[0])
     os.setuid(new_user.pw_uid)
     os.environ["HOME"] = new_user.pw_dir
+
+
+def list_split(input: list, size: int) -> List[list]:
+    return [input[i:i + size] for i in range(0, len(input), size)]

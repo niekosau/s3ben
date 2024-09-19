@@ -1,8 +1,10 @@
 import os
 import signal
+import multiprocessing
+import time
 from s3ben.s3 import S3Events
 from s3ben.rabbit import RabbitMQ
-from s3ben.helpers import drop_privileges
+from s3ben.helpers import drop_privileges, list_split
 from logging import getLogger
 from pathlib import Path
 
@@ -55,9 +57,20 @@ class BackupManager():
 
     def sync_bucket_files(self, bucket: str, threads: int) -> None:
         _logger.info(f"Syncing bucket: {bucket}")
-        # bucket_info = self._s3_client.get_bucket(bucket=bucket)
-        # _logger.debug(json.dumps(bucket_info, indent=2, default=str))
-        self._s3_client.download_all_objects(
-                bucket_name=bucket,
-                dest=self._backup_root,
-                threads=threads)
+        start = time.perf_counter()
+        all_objects = self._s3_client._get_all_objects(bucket_name=bucket)
+        elements = len(all_objects) // threads
+        splited_objects = list_split(all_objects, elements)
+        processes = []
+        for split in splited_objects:
+            process = multiprocessing.Process(
+                    target=self._s3_client.download_all_objects,
+                    args=(bucket, split, ))
+            processes.append(process)
+        for proc in processes:
+            _logger.debug(f"Starting {proc}")
+            proc.start()
+        for proc in processes:
+            proc.join()
+        end = time.perf_counter()
+        _logger.info(f"Sync took: {round(end - start, 2)} seconds")

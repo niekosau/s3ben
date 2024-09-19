@@ -69,23 +69,32 @@ class BackupManager():
                 continue
             os.makedirs(fp)
 
-    def sync_bucket_files(self, bucket: str, threads: int) -> None:
-        _logger.info(f"Syncing bucket: {bucket}")
+    def sync_bucket_files(self, bucket: str, threads: int, page_size: int = 2000) -> None:
+        """
+        Sync files using paginator
+        """
+        _logger.info("Starting bucket sync-v2")
         start = time.perf_counter()
-        all_objects = self._s3_client._get_all_objects(bucket_name=bucket)
-        self._make_dir_tree(bucket_name=bucket, paths=all_objects)
-        elements = len(all_objects) // threads
-        splited_objects = list_split(all_objects, elements)
-        processes = []
-        for split in splited_objects:
-            process = multiprocessing.Process(
-                    target=self._s3_client.download_all_objects,
-                    args=(bucket, split, ))
-            processes.append(process)
-        for proc in processes:
-            _logger.debug(f"Starting {proc}")
-            proc.start()
-        for proc in processes:
-            proc.join()
-        end = time.perf_counter()
+        paginator = self._s3_client.client_s3.get_paginator("list_objects_v2")
+        page_config = {
+                'PageSize': page_size
+                }
+        pages = paginator.paginate(Bucket=bucket, PaginationConfig=page_config)
+        for page in pages:
+            objects = [o.get("Key") for o in page["Contents"]]
+            self._make_dir_tree(bucket_name=bucket, paths=objects)
+            elements = 1 if len(objects) <= threads else len(objects) // threads
+            splited_objects = list_split(objects, elements)
+            processes = []
+            for split in splited_objects:
+                process = multiprocessing.Process(
+                        target=self._s3_client.download_all_objects,
+                        args=(bucket, split, ))
+                processes.append(process)
+            for proc in processes:
+                _logger.debug(f"Starting {proc}")
+                proc.start()
+            for proc in processes:
+                proc.join()
+            end = time.perf_counter()
         _logger.info(f"Sync took: {round(end - start, 2)} seconds")

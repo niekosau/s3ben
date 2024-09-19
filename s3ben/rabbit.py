@@ -1,7 +1,6 @@
 import pika
 import functools
 import json
-import os
 from logging import getLogger
 from s3ben.s3 import S3Events
 

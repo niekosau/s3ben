@@ -143,7 +143,11 @@ def consume(config: dict, args: Namespace) -> None:
             "--threads",
             help="Number of threads to start, default: %(default)i",
             type=int,
-            default=4)
+            default=4),
+        argument(
+            "--page-size",
+            help="Bucket object page size, default: %(default)s",
+            default=2000)
         ],
         parent=subparser)
 def sync(config: dict, args: Namespace):
@@ -163,4 +167,4 @@ def sync(config: dict, args: Namespace):
             backup_root=backup_root,
             user=config["s3ben"].pop("user"),
             s3_client=s3_events)
-    backup.sync_bucket_files(args.bucket, args.threads)
+    backup.sync_bucket_files(args.bucket, args.threads, args.page_size)

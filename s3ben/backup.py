@@ -55,10 +55,25 @@ class BackupManager():
         except SystemExit:
             self._mq.stop()
 
+    def _make_dir_tree(self, bucket_name: str, paths: list) -> None:
+        """
+        Create directory tree from list of paths
+        :param str bucket_name: buclet name
+        :param list paths: list with paths
+        """
+        _logger.info("Creating directory tree")
+        uniq_dirs = {os.path.dirname(p) for p in paths}
+        for dir in uniq_dirs:
+            fp = os.path.join(self._backup_root, "active", bucket_name, dir)
+            if os.path.isdir(fp):
+                continue
+            os.makedirs(fp)
+
     def sync_bucket_files(self, bucket: str, threads: int) -> None:
         _logger.info(f"Syncing bucket: {bucket}")
         start = time.perf_counter()
         all_objects = self._s3_client._get_all_objects(bucket_name=bucket)
+        self._make_dir_tree(bucket_name=bucket, paths=all_objects)
         elements = len(all_objects) // threads
         splited_objects = list_split(all_objects, elements)
         processes = []

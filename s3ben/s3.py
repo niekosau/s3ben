@@ -1,5 +1,4 @@
 import boto3
-import time
 import os
 import sys
 import botocore
@@ -130,6 +129,14 @@ class S3Events():
             _logger.error(f"Bucket {bucket} not found")
             sys.exit()
 
+    def __decuple_download(self, input: tuple) -> None:
+        bucket, path = input
+        full_path = os.path.join(self._download, bucket, path)
+        if os.path.isfile(full_path):
+            _logger.warning(f"{path} object exists, skipping")
+            return
+        self.download_object(bucket, path)
+
     def download_object(self, bucket: str, path: str):
         """
         Get an object from a bucket
@@ -141,14 +148,13 @@ class S3Events():
         dir = os.path.dirname(destination)
         if not os.path.exists(dir):
             os.makedirs(dir)
-        _logger.debug(f"bucket: {bucket}, obj: {path}, dest: {destination}")
         try:
             self.client_s3.head_object(Bucket=bucket, Key=path)
         except botocore.exceptions.ClientError as err:
             if err.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
                 _logger.warning(f"{path} not found in bucket: {bucket}")
         else:
-            _logger.info(f"Downloading {path} from {bucket}")
+            _logger.info(f"Downloading {bucket}:{path}")
             self.client_s3.download_file(Bucket=bucket, Key=path, Filename=destination)
 
     def remove_object(self, bucket: str, path: str) -> None:
@@ -182,12 +188,10 @@ class S3Events():
         :param int threads: Number of threads to start
         :return: None
         """
-        for obj in obj_keys:
-            full_path = os.path.join(self._download, bucket_name, obj)
-            if os.path.isfile(full_path):
-                _logger.warning(f"{obj} already exists, skipping")
-                continue
-            self.download_object(bucket=bucket_name, path=obj)
+        threads = 2
+        with multiprocessing.pool.ThreadPool(threads) as threads:
+            iterate = zip(itertools.repeat(bucket_name), obj_keys)
+            threads.map(self.__decuple_download, iterate)
 
     def _get_all_objects(self, bucket_name) -> list:
         """

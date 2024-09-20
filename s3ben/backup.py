@@ -77,7 +77,6 @@ class BackupManager():
         start = time.perf_counter()
         progress = ProgressBar()
         info = self._s3_client.get_bucket(bucket)
-        progress.suffix = "Downloading"
         total_objects = info["usage"]["rgw.main"]["num_objects"]
         progress.total = total_objects
         progress.draw()
@@ -89,7 +88,7 @@ class BackupManager():
         for page in pages:
             objects = [o.get("Key") for o in page["Contents"]]
             obf_fetched = len(objects)
-            progress.progress = obf_fetched
+            progress.progress += obf_fetched
             self._make_dir_tree(bucket_name=bucket, paths=objects)
             elements = 1 if len(objects) <= threads else len(objects) // threads
             splited_objects = list_split(objects, elements)

@@ -4,7 +4,7 @@ import multiprocessing
 import time
 from s3ben.s3 import S3Events
 from s3ben.rabbit import RabbitMQ
-from s3ben.helpers import drop_privileges, list_split
+from s3ben.helpers import drop_privileges, list_split, ProgressBar
 from logging import getLogger
 from pathlib import Path
 
@@ -75,6 +75,12 @@ class BackupManager():
         """
         _logger.info("Starting bucket sync-v2")
         start = time.perf_counter()
+        progress = ProgressBar()
+        info = self._s3_client.get_bucket(bucket)
+        progress.suffix = "Downloading"
+        total_objects = info["usage"]["rgw.main"]["num_objects"]
+        progress.total = total_objects
+        progress.draw()
         paginator = self._s3_client.client_s3.get_paginator("list_objects_v2")
         page_config = {
                 'PageSize': page_size
@@ -82,6 +88,8 @@ class BackupManager():
         pages = paginator.paginate(Bucket=bucket, PaginationConfig=page_config)
         for page in pages:
             objects = [o.get("Key") for o in page["Contents"]]
+            obf_fetched = len(objects)
+            progress.progress = obf_fetched
             self._make_dir_tree(bucket_name=bucket, paths=objects)
             elements = 1 if len(objects) <= threads else len(objects) // threads
             splited_objects = list_split(objects, elements)
@@ -96,5 +104,9 @@ class BackupManager():
                 proc.start()
             for proc in processes:
                 proc.join()
-            end = time.perf_counter()
+            progress.draw()
+        progress.progress = total_objects
+        progress.draw()
+        print()
+        end = time.perf_counter()
         _logger.info(f"Sync took: {round(end - start, 2)} seconds")

@@ -1,13 +1,15 @@
-import pika
 import functools
 import json
 from logging import getLogger
+
+import pika
+
 from s3ben.s3 import S3Events
 
 _logger = getLogger(__name__)
 
 
-class RabbitMQ():
+class RabbitMQ:
     """
     Class to setup and consume rabbitmq cluster
     :param str hostname: rabbitmq server address
@@ -18,14 +20,15 @@ class RabbitMQ():
     """
 
     def __init__(
-            self,
-            hostname: str,
-            user: str,
-            password: str,
-            port: int,
-            virtualhost: str) -> None:
+        self, hostname: str, user: str, password: str, port: int, virtualhost: str
+    ) -> None:
         mq_credentials = pika.credentials.PlainCredentials(user, password)
-        self.mq_params = pika.ConnectionParameters(host=hostname, port=port, virtual_host=virtualhost, credentials=mq_credentials)
+        self.mq_params = pika.ConnectionParameters(
+            host=hostname,
+            port=port,
+            virtual_host=virtualhost,
+            credentials=mq_credentials,
+        )
         self.should_reconnect: bool = False
         self.was_consuming = False
 
@@ -68,10 +71,11 @@ class RabbitMQ():
         self._s3_client = s3_client
         self._queue = queue
         self._connection = pika.SelectConnection(
-                parameters=self.mq_params,
-                on_open_callback=self.on_connection_open,
-                on_open_error_callback=self.on_connection_open_error,
-                on_close_callback=self.on_connection_closed)
+            parameters=self.mq_params,
+            on_open_callback=self.on_connection_open,
+            on_open_error_callback=self.on_connection_open_error,
+            on_close_callback=self.on_connection_closed,
+        )
         self._connection.ioloop.start()
 
     def on_connection_open(self, _unused_connection) -> None:
@@ -204,7 +208,9 @@ class RabbitMQ():
         :param str|unicode userdata: Extra user data (consumer tag)
         """
         self._consuming = False
-        _logger.debug(f"RabbitMQ acknowledged the cancellation of the consumer: {userdata}")
+        _logger.debug(
+            f"RabbitMQ acknowledged the cancellation of the consumer: {userdata}"
+        )
         self.close_channel()
 
     def close_channel(self) -> None:
@@ -256,17 +262,17 @@ class RabbitMQ():
         _logger.debug(f"Creating queue: {queue}")
         self._queue = queue
         self._channel.queue_declare(
-                queue=self._queue,
-                durable=True,
-                auto_delete=False,
-                arguments={"x-queue-type": "quorum"})
+            queue=self._queue,
+            durable=True,
+            auto_delete=False,
+            arguments={"x-queue-type": "quorum"},
+        )
 
     def quene_bind(self, routing_key: str) -> None:
         _logger.debug(f"Binding {self._exchange} to {self._queue} with {routing_key}")
         self._channel.queue_bind(
-                queue=self._queue,
-                exchange=self._exchange,
-                routing_key=routing_key)
+            queue=self._queue, exchange=self._exchange, routing_key=routing_key
+        )
 
     def setup_exchange(self, exchange) -> None:
         """
@@ -278,11 +284,12 @@ class RabbitMQ():
         _logger.debug(f"Declaring exhange {exchange}")
         self._exchange = exchange
         self._channel.exchange_declare(
-                exchange=self._exchange,
-                durable=True,
-                exchange_type="direct",
-                auto_delete=False,
-                internal=False)
+            exchange=self._exchange,
+            durable=True,
+            exchange_type="direct",
+            auto_delete=False,
+            internal=False,
+        )
 
     def start_consuming(self) -> None:
         """This method sets up the consumer by first calling
@@ -341,7 +348,9 @@ class RabbitMQ():
             event = record["eventName"]
             bucket = record["s3"]["bucket"]["name"]
             obj_key = record["s3"]["object"]["key"]
-            _logger.debug(f"Bucket: {bucket} event: {event} file: {obj_key} size: {obj_size}")
+            _logger.debug(
+                f"Bucket: {bucket} event: {event} file: {obj_key} size: {obj_size}"
+            )
             action = self.__bucket_event(event=event)
             if action == "download":
                 self._s3_client.download_object(bucket=bucket, path=obj_key)
@@ -387,7 +396,7 @@ class RabbitMQ():
         :param pika.frame.Method _unused_frame: The Basic.QosOk response frame
 
         """
-        _logger.info('QOS set to: %d', self._prefetch_count)
+        _logger.info("QOS set to: %d", self._prefetch_count)
         self.start_consuming()
 
     def set_qos(self):
@@ -399,4 +408,5 @@ class RabbitMQ():
         """
         _logger.debug(f"Setting prefetch: {self._prefetch_count}")
         self._channel.basic_qos(
-            prefetch_count=self._prefetch_count, callback=self.on_basic_qos_ok)
+            prefetch_count=self._prefetch_count, callback=self.on_basic_qos_ok
+        )

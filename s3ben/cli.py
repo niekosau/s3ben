@@ -141,8 +141,8 @@ def consume(config: dict, args: Namespace) -> None:
     [
         argument("--bucket", required=True, help="Bucket name which to sync", type=str),
         argument(
-            "--threads",
-            help="Number of threads to start, default: %(default)i",
+            "--transfers",
+            help="Number of transfer processes, default: %(default)i",
             type=int,
             default=4,
         ),
@@ -151,6 +151,11 @@ def consume(config: dict, args: Namespace) -> None:
             help="Bucket object page size, default: %(default)s",
             type=int,
             default=2000,
+        ),
+        argument(
+            "--ui",
+            help="Use experimental ui, default: %(default)s",
+            action="store_true",
         ),
     ],
     parent=subparser,
@@ -170,7 +175,9 @@ def sync(config: dict, args: Namespace):
         backup_root=backup_root,
     )
     backup = BackupManager(
-        backup_root=backup_root, user=config["s3ben"].pop("user"), s3_client=s3_events
+        backup_root=backup_root,
+        user=config["s3ben"].pop("user"),
+        s3_client=s3_events,
+        curses=args.ui,
     )
-    # backup.sync_bucket_files(args.bucket, args.threads, args.page_size)
-    backup.sync_bucket(args.bucket, args.threads, args.page_size)
+    backup.sync_bucket(args.bucket, args.transfers, args.page_size)

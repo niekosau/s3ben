@@ -120,7 +120,7 @@ class BackupManager:
             try:
                 data = self._progress_queue.get(timeout=0.5)
             except Empty:
-                ui._running_time_win()
+                ui.progress(progress=ui._progress)
                 continue
             else:
                 ui.progress(progress=ui._progress + data)

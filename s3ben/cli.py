@@ -1,16 +1,17 @@
+import multiprocessing
 import os
 import pwd
-import multiprocessing
 from argparse import Namespace
-from s3ben.logger import init_logger
-from s3ben.sentry import init_sentry
-from s3ben.decorators import command, argument
+from logging import getLogger
+
 from s3ben.arguments import base_args
-from s3ben.s3 import S3Events
 from s3ben.backup import BackupManager
 from s3ben.config import parse_config
+from s3ben.decorators import argument, command
+from s3ben.logger import init_logger
 from s3ben.rabbit import RabbitMQ
-from logging import getLogger
+from s3ben.s3 import S3Events
+from s3ben.sentry import init_sentry
 
 _logger = getLogger(__name__)
 args = base_args()
@@ -60,30 +61,33 @@ def setup(config: dict, args: Namespace) -> None:
     mq_port = mq_conf.pop("port")
     mq_virtualhost = mq_conf.pop("virtualhost")
     mq = RabbitMQ(
-            hostname=mq_host,
-            user=mq_user,
-            password=mq_pass,
-            port=mq_port,
-            virtualhost=mq_virtualhost)
+        hostname=mq_host,
+        user=mq_user,
+        password=mq_pass,
+        port=mq_port,
+        virtualhost=mq_virtualhost,
+    )
     mq.prepare(exchange=exchange, queue=queue, routing_key=routing_key)
     _logger.info("Setting up S3")
     s3 = config.pop("s3")
     s3_events = S3Events(
-            hostname=s3.pop("hostname"),
-            access_key=s3.pop("access_key"),
-            secret_key=s3.pop("secret_key"),
-            secure=s3.pop("secure"))
+        hostname=s3.pop("hostname"),
+        access_key=s3.pop("access_key"),
+        secret_key=s3.pop("secret_key"),
+        secure=s3.pop("secure"),
+    )
     all_buckets = s3_events.get_admin_buckets()
     exclude_buckets = s3.pop("exclude").split(",")
     exclude_buckets = [b.strip() for b in exclude_buckets]
     filtered_buckets = list(set(all_buckets) - set(exclude_buckets))
     s3_events.create_topic(
-            mq_host=mq_host,
-            mq_user=mq_user,
-            mq_port=mq_port,
-            mq_password=mq_pass,
-            exchange=exchange,
-            mq_virtualhost=mq_virtualhost)
+        mq_host=mq_host,
+        mq_user=mq_user,
+        mq_port=mq_port,
+        mq_password=mq_pass,
+        exchange=exchange,
+        mq_virtualhost=mq_virtualhost,
+    )
     for bucket in filtered_buckets:
         _logger.debug(f"Setting up bucket: {bucket}")
         s3_events.create_notification(bucket=bucket, exchange=exchange)
@@ -100,22 +104,22 @@ def init_consumer(config: dict) -> None:
     backup_root = main.pop("backup_root")
     s3 = config.pop("s3")
     s3_events = S3Events(
-            hostname=s3.pop("hostname"),
-            access_key=s3.pop("access_key"),
-            secret_key=s3.pop("secret_key"),
-            secure=s3.pop("secure"),
-            backup_root=backup_root)
+        hostname=s3.pop("hostname"),
+        access_key=s3.pop("access_key"),
+        secret_key=s3.pop("secret_key"),
+        secure=s3.pop("secure"),
+        backup_root=backup_root,
+    )
     mq = RabbitMQ(
-            hostname=mq_host,
-            user=mq_user,
-            password=mq_pass,
-            port=mq_port,
-            virtualhost=mq_conf.get("virtualhost"))
+        hostname=mq_host,
+        user=mq_user,
+        password=mq_pass,
+        port=mq_port,
+        virtualhost=mq_conf.get("virtualhost"),
+    )
     backup = BackupManager(
-            backup_root=backup_root,
-            user=main.pop("user"),
-            mq=mq,
-            mq_queue=queue)
+        backup_root=backup_root, user=main.pop("user"), mq=mq, mq_queue=queue
+    )
     backup.start_consumer(s3_client=s3_events)
 
 
@@ -133,23 +137,24 @@ def consume(config: dict, args: Namespace) -> None:
         proc.join()
 
 
-@command([
-        argument(
-            "--bucket",
-            required=True,
-            help="Bucket name which to sync",
-            type=str),
+@command(
+    [
+        argument("--bucket", required=True, help="Bucket name which to sync", type=str),
         argument(
             "--threads",
             help="Number of threads to start, default: %(default)i",
             type=int,
-            default=4),
+            default=4,
+        ),
         argument(
             "--page-size",
             help="Bucket object page size, default: %(default)s",
-            default=2000)
-        ],
-        parent=subparser)
+            type=int,
+            default=2000,
+        ),
+    ],
+    parent=subparser,
+)
 def sync(config: dict, args: Namespace):
     """
     Entry point for sync cli option
@@ -158,13 +163,14 @@ def sync(config: dict, args: Namespace):
     s3 = config.pop("s3")
     backup_root = config["s3ben"].pop("backup_root")
     s3_events = S3Events(
-            hostname=s3.pop("hostname"),
-            access_key=s3.pop("access_key"),
-            secret_key=s3.pop("secret_key"),
-            secure=s3.pop("secure"),
-            backup_root=backup_root)
+        hostname=s3.pop("hostname"),
+        access_key=s3.pop("access_key"),
+        secret_key=s3.pop("secret_key"),
+        secure=s3.pop("secure"),
+        backup_root=backup_root,
+    )
     backup = BackupManager(
-            backup_root=backup_root,
-            user=config["s3ben"].pop("user"),
-            s3_client=s3_events)
-    backup.sync_bucket_files(args.bucket, args.threads, args.page_size)
+        backup_root=backup_root, user=config["s3ben"].pop("user"), s3_client=s3_events
+    )
+    # backup.sync_bucket_files(args.bucket, args.threads, args.page_size)
+    backup.sync_bucket(args.bucket, args.threads, args.page_size)

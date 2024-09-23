@@ -6,7 +6,11 @@ def argument(*name_or_flags, **kwargs):
     return (list(name_or_flags), kwargs)
 
 
-def command(args: List[argument] = [], parent: ArgumentParser = None, cmd_aliases: List[str] = None):
+def command(
+    args: List[argument] = [],
+    parent: ArgumentParser = None,
+    cmd_aliases: List[str] = None,
+):
     """
     Decorator for argument parser
     :param ArgumentParser parent: parent for arguments
@@ -20,9 +24,10 @@ def command(args: List[argument] = [], parent: ArgumentParser = None, cmd_aliase
         parser = parent.add_parser(
             func.__name__.replace("_", "-"),
             description=func.__doc__,
-            aliases=cmd_aliases
+            aliases=cmd_aliases,
         )
         for arg in args:
             parser.add_argument(*arg[0], **arg[1])
         parser.set_defaults(func=func)
+
     return decorator

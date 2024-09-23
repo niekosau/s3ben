@@ -1,5 +1,5 @@
-import os
 import configparser
+import os
 from logging import getLogger
 from pathlib import Path
 

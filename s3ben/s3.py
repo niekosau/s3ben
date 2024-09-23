@@ -147,7 +147,7 @@ class S3Events():
         destination = os.path.join(self._download, bucket, path)
         dir = os.path.dirname(destination)
         if not os.path.exists(dir):
-            os.makedirs(dir)
+            os.makedirs(dir, exist_ok=True)
         try:
             self.client_s3.head_object(Bucket=bucket, Key=path)
         except botocore.exceptions.ClientError as err:
@@ -201,6 +201,31 @@ class S3Events():
         """
         objects = self.resouce.Bucket(bucket_name).objects.all()
         return [o.key for o in objects]
+
+    def download_all_objects_v2(
+            self,
+            baucket_name: str,
+            step: int,
+            page_queue: multiprocessing.Queue) -> None:
+        """
+        Download objects from page object iterating every n'th page
+        :param str bucket_name: Name of the bucket
+        :param page: bot paginator
+        :param int step: For loop step for multiprocess support
+        :param multiprocessing.Queue queu: Multiprocess queu for exchanging information
+        """
+        import time
+        print("Process started")
+        while True:
+            data = page_queue.get(block=True, timeout=10)
+            print(len(data[0]["Contents"]))
+            if page_queue.empty():
+                print("breaking")
+                break
+            time.sleep(0.5)
+        # page = page_queue.get(True)
+        # print(json.dumps(p, indent=2, default=str))
+
 
     def _check_if_object_exists(self, path):
         pass

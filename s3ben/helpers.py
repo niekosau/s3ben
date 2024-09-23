@@ -1,9 +1,10 @@
-import os
-import sys
-import pwd
 import grp
-from typing import List
+import os
+import pwd
+import sys
 from datetime import datetime
+from typing import List
+
 from s3ben.constants import UNITS
 
 
@@ -17,15 +18,17 @@ def drop_privileges(user: str) -> None:
     if new_user.pw_uid == os.getuid():
         return
     new_gids = [new_user.pw_gid]
-    new_gids += [group.gr_gid for group in grp.getgrall() if new_user.pw_name in group.gr_mem]
-    os.setgroups(new_gids[:os.NGROUPS_MAX])
+    new_gids += [
+        group.gr_gid for group in grp.getgrall() if new_user.pw_name in group.gr_mem
+    ]
+    os.setgroups(new_gids[: os.NGROUPS_MAX])
     os.setgid(new_user[0])
     os.setuid(new_user.pw_uid)
     os.environ["HOME"] = new_user.pw_dir
 
 
 def list_split(input: list, size: int) -> List[list]:
-    return [input[i:i + size] for i in range(0, len(input), size)]
+    return [input[i : i + size] for i in range(0, len(input), size)]
 
 
 def convert_to_human(value: int) -> tuple:
@@ -40,7 +43,7 @@ def convert_to_human(value: int) -> tuple:
     return value, unit
 
 
-class ProgressBar():
+class ProgressBar:
     """
     Progress bar class
     """
@@ -56,22 +59,22 @@ class ProgressBar():
     _total_progress = "[{0: ^8.2f}{1:<3}]"
     _completed: float = 0.00
     current_marker: list = ["-", "\\", "|", "/"]
-    filler_marker: str = " "
+    filler_marker: str = "."
     bar_length: int = 0
     bar_size: int = 0
     _preffix: str = ""
     _suffix: str = ""
-    _done_marker: str = "#"
+    _done_marker: str = "█"
     _total: float = 100.00
 
     def __init__(
-                self,
-                show_percents: bool = True,
-                show_estimate: bool = True,
-                show_runtime: bool = True,
-                show_speed: bool = False,
-                show_transfer: bool = True
-            ):
+        self,
+        show_percents: bool = True,
+        show_estimate: bool = True,
+        show_runtime: bool = True,
+        show_speed: bool = False,
+        show_transfer: bool = True,
+    ):
         self.terminal_size: int = os.get_terminal_size().columns
         self.percents: str = self._percents.format(0)
         self.show_percents: bool = show_percents
@@ -186,15 +189,15 @@ class ProgressBar():
                 self.bar_size = self.terminal_size - bar_info - 3
                 left_size = self.bar_size - finished
                 bar[bar_index] = self._progress.format(
-                        self._done_marker if finished > 1 else "",
-                        self.__get_current_marker() if left_size > 0 else "",
-                        self.filler_marker if left_size > 0 else "",
-                        done_marker=self._done_marker,
-                        done_size=finished if left_size > 0 else self.bar_size,
-                        in_progress_marker=self.filler_marker,
-                        base_marker=self.filler_marker,
-                        left_size=left_size if left_size > 0 else 0
-                    )
+                    self._done_marker if finished > 1 else "",
+                    self.__get_current_marker() if left_size > 0 else "",
+                    self.filler_marker if left_size > 0 else "",
+                    done_marker=self._done_marker,
+                    done_size=finished if left_size > 0 else self.bar_size,
+                    in_progress_marker=self.filler_marker,
+                    base_marker=self.filler_marker,
+                    left_size=left_size if left_size > 0 else 0,
+                )
             else:
                 bar.pop(bar_index)
         if self.bar_size <= finished:

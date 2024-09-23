@@ -1,17 +1,17 @@
-import os
-import signal
 import multiprocessing
+import signal
 import time
-from s3ben.s3 import S3Events
-from s3ben.rabbit import RabbitMQ
-from s3ben.helpers import drop_privileges, list_split, ProgressBar
 from logging import getLogger
-from pathlib import Path
+from queue import Empty
+
+from s3ben.helpers import ProgressBar, drop_privileges
+from s3ben.rabbit import RabbitMQ
+from s3ben.s3 import S3Events
 
 _logger = getLogger(__name__)
 
 
-class BackupManager():
+class BackupManager:
     """
     Class to coordinate all tasks
 
@@ -22,28 +22,29 @@ class BackupManager():
     """
 
     def __init__(
-            self,
-            backup_root: str,
-            user: str,
-            mq_queue: str = None,
-            mq: RabbitMQ = None,
-            s3_client: S3Events = None):
+        self,
+        backup_root: str,
+        user: str,
+        mq_queue: str = None,
+        mq: RabbitMQ = None,
+        s3_client: S3Events = None,
+    ):
         self._backup_root = backup_root
         self._user = user
         self._mq = mq
         self._mq_queue = mq_queue
         self._s3_client = s3_client
+        self._bucket_name: str = None
+        self._page_size: int = None
+        self._progress_queue = None
+        self._exchange_queue = None
+        self._end_event = None
+        self._barrier = None
         signal.signal(signal.SIGTERM, self.__exit)
         signal.signal(signal.SIGINT, self.__exit)
 
     def __exit(self, signal_no, stack_frame) -> None:
         raise SystemExit("Exiting")
-
-    def _check_destination(self, path: Path) -> None:
-        if not os.path.exists(path):
-            _logger.debug(f"Creating: {path}")
-            os.makedirs(path, mode=0o750)
-            os.chown(path, uid=self._uuid, gid=self._guid)
 
     def start_consumer(self, s3_client: S3Events) -> None:
         _logger.debug(f"Dropping privileges to {self._user}")
@@ -55,57 +56,79 @@ class BackupManager():
         except SystemExit:
             self._mq.stop()
 
-    def _make_dir_tree(self, bucket_name: str, paths: list) -> None:
-        """
-        Create directory tree from list of paths
-        :param str bucket_name: buclet name
-        :param list paths: list with paths
-        """
-        _logger.info("Creating directory tree")
-        uniq_dirs = {os.path.dirname(p) for p in paths}
-        for dir in uniq_dirs:
-            fp = os.path.join(self._backup_root, "active", bucket_name, dir)
-            if os.path.isdir(fp):
-                continue
-            os.makedirs(fp)
-
-    def sync_bucket_files(self, bucket: str, threads: int, page_size: int = 2000) -> None:
-        """
-        Sync files using paginator
-        """
-        _logger.info("Starting bucket sync-v2")
-        start = time.perf_counter()
+    def _progress(self) -> None:
         progress = ProgressBar()
-        info = self._s3_client.get_bucket(bucket)
+        info = self._s3_client.get_bucket(self._bucket_name)
         total_objects = info["usage"]["rgw.main"]["num_objects"]
         progress.total = total_objects
         progress.draw()
-        paginator = self._s3_client.client_s3.get_paginator("list_objects_v2")
-        page_config = {
-                'PageSize': page_size
-                }
-        pages = paginator.paginate(Bucket=bucket, PaginationConfig=page_config)
-        for page in pages:
-            objects = [o.get("Key") for o in page["Contents"]]
-            obf_fetched = len(objects)
-            progress.progress += obf_fetched
-            self._make_dir_tree(bucket_name=bucket, paths=objects)
-            elements = 1 if len(objects) <= threads else len(objects) // threads
-            splited_objects = list_split(objects, elements)
-            processes = []
-            for split in splited_objects:
-                process = multiprocessing.Process(
-                        target=self._s3_client.download_all_objects,
-                        args=(bucket, split, ))
-                processes.append(process)
-            for proc in processes:
-                _logger.debug(f"Starting {proc}")
-                proc.start()
-            for proc in processes:
-                proc.join()
-            progress.draw()
-        progress.progress = total_objects
-        progress.draw()
-        print()
+        self._barrier.wait()
+        while progress.total > progress.progress:
+            try:
+                data = self._progress_queue.get(timeout=0.2)
+            except Empty:
+                continue
+            else:
+                progress.progress += data
+                progress.draw()
+
+    def sync_bucket(
+        self, bucket_name: str, threads: int, page_size: int = 1000
+    ) -> None:
+        _logger.info("Starting bucket sync")
+        start = time.perf_counter()
+        self._page_size = page_size
+        self._bucket_name = bucket_name
+        proc_manager = multiprocessing.managers.SyncManager()
+        proc_manager.start()
+        self._exchange_queue = proc_manager.Queue()
+        self._progress_queue = proc_manager.Queue()
+        self._end_event = proc_manager.Event()
+        self._barrier = proc_manager.Barrier(threads + 1)
+        reader = multiprocessing.Process(target=self._page_reader)
+        reader.start()
+        progress = multiprocessing.Process(target=self._progress)
+        progress.start()
+        processess = []
+        for _ in range(threads):
+            proc = multiprocessing.Process(target=self._page_processor)
+            processess.append(proc)
+        for proc in processess:
+            proc.start()
+        processess.append(reader)
+        processess.append(progress)
+        for proc in processess:
+            proc.join()
+        proc_manager.shutdown()
+        proc_manager.join()
         end = time.perf_counter()
         _logger.info(f"Sync took: {round(end - start, 2)} seconds")
+
+    def _page_reader(self) -> None:
+        _logger.info("Starting page processing")
+        self._end_event.clear()
+        paginator = self._s3_client.client_s3.get_paginator("list_objects_v2")
+        page_config = {"PageSize": self._page_size}
+        pages = paginator.paginate(
+            Bucket=self._bucket_name, PaginationConfig=page_config
+        )
+        for page in pages:
+            self._exchange_queue.put(page["Contents"])
+        _logger.debug("Finished reading pages")
+        self._end_event.set()
+
+    def _page_processor(self) -> None:
+        proc = multiprocessing.current_process().name
+        _logger.debug(f"Running: {proc}")
+        self._barrier.wait()
+        while True:
+            try:
+                data = self._exchange_queue.get(block=False)
+            except Empty:
+                if self._end_event.is_set():
+                    break
+                continue
+            else:
+                keys = [i.get("Key") for i in data]
+                self._s3_client.download_all_objects(self._bucket_name, keys)
+                self._progress_queue.put(len(keys))

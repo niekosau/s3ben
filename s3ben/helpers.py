@@ -3,9 +3,10 @@ import os
 import pwd
 import sys
 from datetime import datetime
-from typing import List
 
 from s3ben.constants import UNITS
+
+# from typing import List
 
 
 def drop_privileges(user: str) -> None:
@@ -27,8 +28,8 @@ def drop_privileges(user: str) -> None:
     os.environ["HOME"] = new_user.pw_dir
 
 
-def list_split(input: list, size: int) -> List[list]:
-    return [input[i : i + size] for i in range(0, len(input), size)]
+# def list_split(input: list, size: int) -> List[list]:
+#     return [input[i : i + size] for i in range(0, len(input), size)]
 
 
 def convert_to_human(value: int) -> tuple:

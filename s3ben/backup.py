@@ -7,6 +7,7 @@ from queue import Empty
 from s3ben.helpers import ProgressBar, drop_privileges
 from s3ben.rabbit import RabbitMQ
 from s3ben.s3 import S3Events
+from s3ben.ui import S3benGui
 
 _logger = getLogger(__name__)
 
@@ -28,6 +29,7 @@ class BackupManager:
         mq_queue: str = None,
         mq: RabbitMQ = None,
         s3_client: S3Events = None,
+        curses: bool = False,
     ):
         self._backup_root = backup_root
         self._user = user
@@ -40,6 +42,7 @@ class BackupManager:
         self._exchange_queue = None
         self._end_event = None
         self._barrier = None
+        self._curses = curses
         signal.signal(signal.SIGTERM, self.__exit)
         signal.signal(signal.SIGINT, self.__exit)
 
@@ -62,7 +65,6 @@ class BackupManager:
         total_objects = info["usage"]["rgw.main"]["num_objects"]
         progress.total = total_objects
         progress.draw()
-        self._barrier.wait()
         while progress.total > progress.progress:
             try:
                 data = self._progress_queue.get(timeout=0.5)
@@ -85,11 +87,9 @@ class BackupManager:
         self._exchange_queue = proc_manager.Queue(maxsize=threads * 2)
         self._progress_queue = proc_manager.Queue()
         self._end_event = proc_manager.Event()
-        self._barrier = proc_manager.Barrier(threads + 1)
+        self._barrier = proc_manager.Barrier(threads)
         reader = multiprocessing.Process(target=self._page_reader)
         reader.start()
-        progress = multiprocessing.Process(target=self._progress)
-        progress.start()
         processess = []
         for _ in range(threads):
             proc = multiprocessing.Process(target=self._page_processor)
@@ -97,13 +97,33 @@ class BackupManager:
         for proc in processess:
             proc.start()
         processess.append(reader)
-        processess.append(progress)
+        if not self._curses:
+            progress = multiprocessing.Process(target=self._progress)
+            progress.start()
+            processess.append(progress)
+        else:
+            ui = multiprocessing.Process(target=self._curses_ui)
+            ui.start()
+            processess.append(ui)
         for proc in processess:
             proc.join()
         proc_manager.shutdown()
         proc_manager.join()
         end = time.perf_counter()
         _logger.info(f"Sync took: {round(end - start, 2)} seconds")
+
+    def _curses_ui(self) -> None:
+        info = self._s3_client.get_bucket(self._bucket_name)
+        total_objects = info["usage"]["rgw.main"]["num_objects"]
+        ui = S3benGui(title=f"Syncing buclet: {self._bucket_name}", total=total_objects)
+        while True:
+            try:
+                data = self._progress_queue.get(timeout=0.5)
+            except Empty:
+                ui._running_time_win()
+                continue
+            else:
+                ui.progress(progress=ui._progress + data)
 
     def _page_reader(self) -> None:
         _logger.info("Starting page processing")

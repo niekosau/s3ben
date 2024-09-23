@@ -1,7 +1,7 @@
-import os
 import configparser
-from pathlib import Path
+import os
 from logging import getLogger
+from pathlib import Path
 
 _logger = getLogger(__name__)
 

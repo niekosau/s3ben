@@ -1,21 +1,23 @@
-import boto3
-import os
-import sys
-import botocore
-import shutil
 import datetime
 import itertools
-import rgwadmin
 import multiprocessing
-import botocore.errorfactory
-from s3ben.constants import TOPIC_ARN, NOTIFICATION_EVENTS, AMQP_HOST
-from rgwadmin import RGWAdmin
+import os
+import shutil
+import sys
 from logging import getLogger
+
+import boto3
+import botocore
+import botocore.errorfactory
+import rgwadmin
+from rgwadmin import RGWAdmin
+
+from s3ben.constants import AMQP_HOST, NOTIFICATION_EVENTS, TOPIC_ARN
 
 _logger = getLogger(__name__)
 
 
-class S3Events():
+class S3Events:
     """
     Class for configuring or showing config of the bucket
     :param str secret_key: Secret key fro s3
@@ -24,39 +26,40 @@ class S3Events():
     """
 
     def __init__(
-            self,
-            secret_key: str,
-            access_key: str,
-            hostname: str,
-            secure: bool,
-            backup_root: str = None) -> None:
+        self,
+        secret_key: str,
+        access_key: str,
+        hostname: str,
+        secure: bool,
+        backup_root: str = None,
+    ) -> None:
         self._download = os.path.join(backup_root, "active") if backup_root else None
         self._remove = os.path.join(backup_root, "deleted") if backup_root else None
         protocol = "https" if secure else "http"
         endpoint = f"{protocol}://{hostname}"
         self.client_s3 = boto3.client(
-                service_name="s3",
-                region_name="default",
-                endpoint_url=endpoint,
-                aws_access_key_id=access_key,
-                aws_secret_access_key=secret_key
-                )
+            service_name="s3",
+            region_name="default",
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+        )
         self.client_sns = boto3.client(
-                service_name="sns",
-                region_name="default",
-                endpoint_url=endpoint,
-                aws_access_key_id=access_key,
-                aws_secret_access_key=secret_key,
-                config=botocore.client.Config(signature_version='s3'))
+            service_name="sns",
+            region_name="default",
+            endpoint_url=endpoint,
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+            config=botocore.client.Config(signature_version="s3"),
+        )
         self.client_admin = RGWAdmin(
-                access_key=access_key,
-                secret_key=secret_key,
-                server=hostname,
-                secure=secure)
+            access_key=access_key, secret_key=secret_key, server=hostname, secure=secure
+        )
         self.session = boto3.Session(
-                region_name="default",
-                aws_access_key_id=access_key,
-                aws_secret_access_key=secret_key)
+            region_name="default",
+            aws_access_key_id=access_key,
+            aws_secret_access_key=secret_key,
+        )
         self.resouce = self.session.resource(service_name="s3", endpoint_url=endpoint)
 
     def get_config(self, bucket: str):
@@ -71,25 +74,32 @@ class S3Events():
         self.client_s3.create_bucket(Bucket=bucket)
 
     def create_topic(
-            self,
-            mq_host: str,
-            mq_user: str,
-            mq_password: str,
-            exchange: str,
-            mq_port: int,
-            mq_virtualhost: str) -> None:
+        self,
+        mq_host: str,
+        mq_user: str,
+        mq_password: str,
+        exchange: str,
+        mq_port: int,
+        mq_virtualhost: str,
+    ) -> None:
         """
         Create bucket event notification config
         :param str bucket: Bucket name for config update
         :param str amqp: rabbitmq address
         """
-        amqp = AMQP_HOST.format(user=mq_user, password=mq_password, host=mq_host, port=mq_port, virtualhost=mq_virtualhost)
+        amqp = AMQP_HOST.format(
+            user=mq_user,
+            password=mq_password,
+            host=mq_host,
+            port=mq_port,
+            virtualhost=mq_virtualhost,
+        )
         attributes = {
-                "push-endpoint": amqp,
-                "amqp-exchange": exchange,
-                "amqp-ack-level": "broker",
-                "persistent": "true",
-                }
+            "push-endpoint": amqp,
+            "amqp-exchange": exchange,
+            "amqp-ack-level": "broker",
+            "persistent": "true",
+        }
         self.client_sns.create_topic(Name=exchange, Attributes=attributes)
 
     def create_notification(self, bucket: str, exchange: str) -> None:
@@ -99,15 +109,16 @@ class S3Events():
         :param str exchange: Exchange name were to send notification
         """
         notification_config = {
-                'TopicConfigurations': [{
-                    'Id': f"s3ben-{exchange}",
-                    'TopicArn': TOPIC_ARN.format(exchange),
-                    'Events': NOTIFICATION_EVENTS
-                    }]
+            "TopicConfigurations": [
+                {
+                    "Id": f"s3ben-{exchange}",
+                    "TopicArn": TOPIC_ARN.format(exchange),
+                    "Events": NOTIFICATION_EVENTS,
                 }
+            ]
+        }
         self.client_s3.put_bucket_notification_configuration(
-                Bucket=bucket,
-                NotificationConfiguration=notification_config
+            Bucket=bucket, NotificationConfiguration=notification_config
         )
 
     def get_admin_buckets(self) -> list:
@@ -176,7 +187,9 @@ class S3Events():
         if not os.path.exists(dest):
             os.makedirs(dest)
         if os.path.isfile(d_file):
-            _logger.warning(f"Removing {d_file} as another with same name must be moved to deleted items")
+            _logger.warning(
+                f"Removing {d_file} as another with same name must be moved to deleted items"
+            )
             os.remove(d_file)
         shutil.move(src, dest)
 
@@ -203,10 +216,8 @@ class S3Events():
         return [o.key for o in objects]
 
     def download_all_objects_v2(
-            self,
-            baucket_name: str,
-            step: int,
-            page_queue: multiprocessing.Queue) -> None:
+        self, baucket_name: str, step: int, page_queue: multiprocessing.Queue
+    ) -> None:
         """
         Download objects from page object iterating every n'th page
         :param str bucket_name: Name of the bucket
@@ -215,6 +226,7 @@ class S3Events():
         :param multiprocessing.Queue queu: Multiprocess queu for exchanging information
         """
         import time
+
         print("Process started")
         while True:
             data = page_queue.get(block=True, timeout=10)
@@ -223,9 +235,6 @@ class S3Events():
                 print("breaking")
                 break
             time.sleep(0.5)
-        # page = page_queue.get(True)
-        # print(json.dumps(p, indent=2, default=str))
-
 
     def _check_if_object_exists(self, path):
         pass

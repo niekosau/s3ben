@@ -82,7 +82,7 @@ class BackupManager:
         self._bucket_name = bucket_name
         proc_manager = multiprocessing.managers.SyncManager()
         proc_manager.start()
-        self._exchange_queue = proc_manager.Queue()
+        self._exchange_queue = proc_manager.Queue(maxsize=threads * 2)
         self._progress_queue = proc_manager.Queue()
         self._end_event = proc_manager.Event()
         self._barrier = proc_manager.Barrier(threads + 1)

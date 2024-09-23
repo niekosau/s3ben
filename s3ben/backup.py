@@ -65,8 +65,9 @@ class BackupManager:
         self._barrier.wait()
         while progress.total > progress.progress:
             try:
-                data = self._progress_queue.get(timeout=0.2)
+                data = self._progress_queue.get(timeout=0.5)
             except Empty:
+                progress.draw()
                 continue
             else:
                 progress.progress += data

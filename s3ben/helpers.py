@@ -3,8 +3,9 @@ import os
 import pwd
 import sys
 from datetime import datetime
+from typing import Union
 
-from s3ben.constants import UNITS
+from s3ben.constants import SIZE_UNITS, UNITS
 
 # from typing import List
 
@@ -28,13 +29,23 @@ def drop_privileges(user: str) -> None:
     os.environ["HOME"] = new_user.pw_dir
 
 
-# def list_split(input: list, size: int) -> List[list]:
-#     return [input[i : i + size] for i in range(0, len(input), size)]
+def convert_to_human_v2(value: int):
+    """
+    Convert size to human
+    """
+    suffix = "B"
+    for unit in SIZE_UNITS:
+        if abs(value) < 1024.0:
+            break
+        if unit == UNITS[-1]:
+            break
+        value /= 1024.0
+    return f"{value:3.1f}{unit}{suffix}"
 
 
 def convert_to_human(value: int) -> tuple:
     if float(value) <= 1000.0:
-        return value, None
+        return value, ""
     for unit in UNITS:
         value /= 1000
         if float(value) < 1000.0:
@@ -57,7 +68,7 @@ class ProgressBar:
     _time_left = "[LEFT: {0:0>2}:{1:0>2}:{2:0>2}]"
     _running = "[RUN: {0:0>2}:{1:0>2}:{2:0>2}]"
     _progress = "[{:{done_marker}>{done_size}}{}{:{base_marker}>{left_size}}]"
-    _total_progress = "[{0: ^8.2f}{1:<3}]"
+    _total_progress = "[{0:>7.2f}{1:1}/{2:<.2f}{3:<1}]"
     _completed: float = 0.00
     current_marker: list = ["-", "\\", "|", "/"]
     filler_marker: str = "."
@@ -86,7 +97,7 @@ class ProgressBar:
         self.run_time = self._running.format(0, 0, 0)
         self._run_time = datetime.now()
         self.speed = self._speed.format(0, "b")
-        self.total_progress = self._total_progress.format(0, "b")
+        self.total_progress = self._total_progress.format(0, "", 0, "")
         self.show_runtime: bool = show_runtime
         self.show_transfer: bool = show_transfer
         self.avg_speed = 0
@@ -117,9 +128,12 @@ class ProgressBar:
 
     def __total_progress(self) -> None:
         progress, units = convert_to_human(self.progress)
+        total, t_units = convert_to_human(self._total)
         if not units:
-            units = " "
-        self.total_progress = self._total_progress.format(progress, units)
+            units = ""
+        self.total_progress = self._total_progress.format(
+            progress, units, total, t_units
+        )
 
     def __run_time(self) -> None:
         self._run_time = datetime.now() - self.time_start

@@ -181,3 +181,25 @@ def sync(config: dict, args: Namespace):
         curses=args.ui,
     )
     backup.sync_bucket(args.bucket, args.transfers, args.page_size)
+
+
+@command(parent=subparser)
+def buckets(config: dict, args: NameError) -> None:
+    _logger.debug("Listing buckets")
+    s3 = config.pop("s3")
+    exclude = s3.pop("exclude").replace('"', "").replace("'", "").split(",")
+    exclude = [e.strip() for e in exclude]
+    backup_root = config["s3ben"].pop("backup_root")
+    s3_events = S3Events(
+        hostname=s3.pop("hostname"),
+        access_key=s3.pop("access_key"),
+        secret_key=s3.pop("secret_key"),
+        secure=s3.pop("secure"),
+        backup_root=backup_root,
+    )
+    backup = BackupManager(
+        backup_root=backup_root,
+        user=config["s3ben"].pop("user"),
+        s3_client=s3_events,
+    )
+    backup.list_buckets(exclude=exclude)

@@ -12,3 +12,4 @@ NOTIFICATION_EVENTS = [
 ]
 AMQP_HOST = "amqp://{user}:{password}@{host}:{port}/{virtualhost}"
 UNITS = ["k", "M"]
+SIZE_UNITS = ["", "Ki", "Mi", "Gi", "Ti", "Pi"]

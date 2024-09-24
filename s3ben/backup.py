@@ -1,10 +1,18 @@
 import multiprocessing
+import os
 import signal
 import time
 from logging import getLogger
 from queue import Empty
 
-from s3ben.helpers import ProgressBar, drop_privileges
+from tabulate import tabulate
+
+from s3ben.helpers import (
+    ProgressBar,
+    convert_to_human,
+    convert_to_human_v2,
+    drop_privileges,
+)
 from s3ben.rabbit import RabbitMQ
 from s3ben.s3 import S3Events
 from s3ben.ui import S3benGui
@@ -153,3 +161,44 @@ class BackupManager:
                 keys = [i.get("Key") for i in data]
                 self._s3_client.download_all_objects(self._bucket_name, keys)
                 self._progress_queue.put(len(keys))
+
+    def list_buckets(self, exclude: list) -> None:
+        results = []
+        s3_buckets = self._s3_client.get_admin_buckets()
+        s3ben_buckets = os.listdir(os.path.join(self._backup_root, "active"))
+        merged_list = list(dict.fromkeys(s3_buckets + s3ben_buckets))
+        for bucket in merged_list:
+            remote_size = None
+            objects = 0
+            unit = ""
+            enabled = True if bucket in s3ben_buckets else ""
+            obsolete = True if bucket not in s3_buckets else ""
+            bucket_excluded = True if bucket in exclude else ""
+            if bucket in s3_buckets:
+                bucket_info = self._s3_client.get_bucket(bucket=bucket)
+                remote_size = convert_to_human_v2(
+                    bucket_info["usage"]["rgw.main"].get("size_utilized")
+                )
+                objects, unit = convert_to_human(
+                    bucket_info["usage"]["rgw.main"].get("num_objects")
+                )
+            info = {
+                "Bucket": bucket,
+                "Owner": bucket_info.get("owner"),
+                "Enabled": enabled,
+                "Obsolete": obsolete,
+                "Exclude": bucket_excluded,
+                "Remote size": remote_size,
+                "Remote objects": f"{objects}{unit}",
+            }
+            results.append(info)
+        # for bucket in s3ben_buckets:
+        #     missing = True if bucket not in s3_buckets else False
+        #     info.update({"missing": missing})
+
+        print(tabulate(results, headers="keys"))
+
+        # try:
+        #     results[bucket].update({"missing": missing})
+        # except KeyError:
+        #     results[bucket] = {"missing": missing}

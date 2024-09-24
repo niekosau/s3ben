@@ -162,18 +162,30 @@ class BackupManager:
                 self._s3_client.download_all_objects(self._bucket_name, keys)
                 self._progress_queue.put(len(keys))
 
-    def list_buckets(self, exclude: list) -> None:
+    def list_buckets(
+        self,
+        exclude: list,
+        show_excludes: bool,
+        show_obsolete: bool,
+        only_enabled: bool,
+    ) -> None:
         results = []
         s3_buckets = self._s3_client.get_admin_buckets()
         s3ben_buckets = os.listdir(os.path.join(self._backup_root, "active"))
         merged_list = list(dict.fromkeys(s3_buckets + s3ben_buckets))
         for bucket in merged_list:
+            bucket_excluded = True if bucket in exclude else ""
+            enabled = True if bucket in s3ben_buckets else ""
+            obsolete = True if bucket not in s3_buckets else ""
+            if not show_excludes and bucket_excluded:
+                continue
+            if not show_obsolete and obsolete:
+                continue
+            if only_enabled and not enabled:
+                continue
             remote_size = 0
             objects = 0
             unit = ""
-            enabled = True if bucket in s3ben_buckets else ""
-            obsolete = True if bucket not in s3_buckets else ""
-            bucket_excluded = True if bucket in exclude else ""
             if bucket in s3_buckets:
                 bucket_info = self._s3_client.get_bucket(bucket=bucket)
                 if "rgw.main" in bucket_info["usage"].keys():
@@ -187,11 +199,19 @@ class BackupManager:
             info = {
                 "Bucket": bucket,
                 "Owner": bucket_info.get("owner"),
-                "Enabled": enabled,
-                "Obsolete": obsolete,
-                "Exclude": bucket_excluded,
-                "Remote size": remote_size,
-                "Remote objects": f"{objects:{remote_format}}{unit}",
             }
+            if not only_enabled:
+                info["Enabled"] = enabled
+            info.update(
+                {
+                    "Remote size": remote_size,
+                    "Remote objects": f"{objects:{remote_format}}{unit}",
+                }
+            )
+            if show_excludes and not only_enabled:
+                info["Exclude"] = bucket_excluded
+
+            if show_obsolete and not only_enabled:
+                info["Obsolete"] = obsolete
             results.append(info)
         print(tabulate(results, headers="keys"))

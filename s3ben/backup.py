@@ -183,6 +183,7 @@ class BackupManager:
                     objects, unit = convert_to_human(
                         bucket_info["usage"]["rgw.main"].get("num_objects")
                     )
+            remote_format = ">3d" if isinstance(objects, int) else ">5.2f"
             info = {
                 "Bucket": bucket,
                 "Owner": bucket_info.get("owner"),
@@ -190,16 +191,7 @@ class BackupManager:
                 "Obsolete": obsolete,
                 "Exclude": bucket_excluded,
                 "Remote size": remote_size,
-                "Remote objects": f"{objects}{unit}",
+                "Remote objects": f"{objects:{remote_format}}{unit}",
             }
             results.append(info)
-        # for bucket in s3ben_buckets:
-        #     missing = True if bucket not in s3_buckets else False
-        #     info.update({"missing": missing})
-
         print(tabulate(results, headers="keys"))
-
-        # try:
-        #     results[bucket].update({"missing": missing})
-        # except KeyError:
-        #     results[bucket] = {"missing": missing}

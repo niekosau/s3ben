@@ -40,14 +40,14 @@ def convert_to_human_v2(value: int):
         if unit == UNITS[-1]:
             break
         value /= 1024.0
-    return f"{value:3.1f}{unit}{suffix}"
+    return f"{value:3.2f}{unit}{suffix}"
 
 
 def convert_to_human(value: int) -> tuple:
     if float(value) <= 1000.0:
         return value, ""
     for unit in UNITS:
-        value /= 1000
+        value /= 1000.0
         if float(value) < 1000.0:
             break
         if unit == UNITS[-1]:
@@ -68,7 +68,8 @@ class ProgressBar:
     _time_left = "[LEFT: {0:0>2}:{1:0>2}:{2:0>2}]"
     _running = "[RUN: {0:0>2}:{1:0>2}:{2:0>2}]"
     _progress = "[{:{done_marker}>{done_size}}{}{:{base_marker}>{left_size}}]"
-    _total_progress = "[{0:>7.2f}{1:1}/{2:<.2f}{3:<1}]"
+    _total_progress = "[{0:>6.2f}{1:1}/{2:<.2f}{3:<1}]"
+    _total_progress_int = "[{0:>7d}/{2:<.2f}{3:<1}]"
     _completed: float = 0.00
     current_marker: list = ["-", "\\", "|", "/"]
     filler_marker: str = "."
@@ -131,9 +132,20 @@ class ProgressBar:
         total, t_units = convert_to_human(self._total)
         if not units:
             units = ""
-        self.total_progress = self._total_progress.format(
-            progress, units, total, t_units
-        )
+        if units == "":
+            self.total_progress = self._total_progress_int.format(
+                int(progress),
+                units,
+                total,
+                t_units,
+            )
+        else:
+            self.total_progress = self._total_progress.format(
+                progress,
+                units,
+                total,
+                t_units,
+            )
 
     def __run_time(self) -> None:
         self._run_time = datetime.now() - self.time_start

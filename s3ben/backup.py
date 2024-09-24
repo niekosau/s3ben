@@ -168,6 +168,8 @@ class BackupManager:
         show_excludes: bool,
         show_obsolete: bool,
         only_enabled: bool,
+        sort: str,
+        sort_revers: bool,
     ) -> None:
         results = []
         s3_buckets = self._s3_client.get_admin_buckets()
@@ -189,12 +191,14 @@ class BackupManager:
             if bucket in s3_buckets:
                 bucket_info = self._s3_client.get_bucket(bucket=bucket)
                 if "rgw.main" in bucket_info["usage"].keys():
-                    remote_size = convert_to_human_v2(
-                        bucket_info["usage"]["rgw.main"].get("size_utilized")
+                    original_size = bucket_info["usage"]["rgw.main"].get(
+                        "size_utilized"
                     )
-                    objects, unit = convert_to_human(
-                        bucket_info["usage"]["rgw.main"].get("num_objects")
+                    remote_size = convert_to_human_v2(original_size)
+                    original_objects = bucket_info["usage"]["rgw.main"].get(
+                        "num_objects"
                     )
+                    objects, unit = convert_to_human(original_objects)
             remote_format = ">3d" if isinstance(objects, int) else ">5.2f"
             info = {
                 "Bucket": bucket,
@@ -204,7 +208,9 @@ class BackupManager:
                 info["Enabled"] = enabled
             info.update(
                 {
+                    "size": original_size,
                     "Remote size": remote_size,
+                    "objects": original_objects,
                     "Remote objects": f"{objects:{remote_format}}{unit}",
                 }
             )
@@ -214,4 +220,15 @@ class BackupManager:
             if show_obsolete and not only_enabled:
                 info["Obsolete"] = obsolete
             results.append(info)
+        if sort == "bucket":
+            results = sorted(results, key=lambda k: k["Bucket"], reverse=sort_revers)
+        if sort == "owner":
+            results = sorted(results, key=lambda k: k["Owner"], reverse=sort_revers)
+        if sort == "size":
+            results = sorted(results, key=lambda k: k["size"], reverse=sort_revers)
+        if sort == "objects":
+            results = sorted(results, key=lambda k: k["objects"], reverse=sort_revers)
+        for r in results:
+            r.pop("size")
+            r.pop("objects")
         print(tabulate(results, headers="keys"))

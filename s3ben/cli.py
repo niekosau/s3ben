@@ -192,6 +192,15 @@ def sync(config: dict, args: Namespace):
             help="Show only backup enabled buckets",
             action="store_true",
         ),
+        argument(
+            "--sort",
+            help="Sort results by select collump, default: %(default)s",
+            choices=["bucket", "owner", "size", "objects"],
+            default="bucket",
+        ),
+        argument(
+            "--sort-reverse", help="Reverse order for sorting", action="store_true"
+        ),
     ],
     parent=subparser,
 )
@@ -218,4 +227,6 @@ def buckets(config: dict, args: NameError) -> None:
         show_excludes=args.show_excluded,
         show_obsolete=args.show_obsolete,
         only_enabled=args.only_enabled,
+        sort=args.sort,
+        sort_revers=args.sort_reverse,
     )

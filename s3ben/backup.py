@@ -168,7 +168,7 @@ class BackupManager:
         s3ben_buckets = os.listdir(os.path.join(self._backup_root, "active"))
         merged_list = list(dict.fromkeys(s3_buckets + s3ben_buckets))
         for bucket in merged_list:
-            remote_size = None
+            remote_size = 0
             objects = 0
             unit = ""
             enabled = True if bucket in s3ben_buckets else ""
@@ -176,12 +176,13 @@ class BackupManager:
             bucket_excluded = True if bucket in exclude else ""
             if bucket in s3_buckets:
                 bucket_info = self._s3_client.get_bucket(bucket=bucket)
-                remote_size = convert_to_human_v2(
-                    bucket_info["usage"]["rgw.main"].get("size_utilized")
-                )
-                objects, unit = convert_to_human(
-                    bucket_info["usage"]["rgw.main"].get("num_objects")
-                )
+                if "rgw.main" in bucket_info["usage"].keys():
+                    remote_size = convert_to_human_v2(
+                        bucket_info["usage"]["rgw.main"].get("size_utilized")
+                    )
+                    objects, unit = convert_to_human(
+                        bucket_info["usage"]["rgw.main"].get("num_objects")
+                    )
             info = {
                 "Bucket": bucket,
                 "Owner": bucket_info.get("owner"),

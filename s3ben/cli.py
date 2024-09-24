@@ -183,7 +183,18 @@ def sync(config: dict, args: Namespace):
     backup.sync_bucket(args.bucket, args.transfers, args.page_size)
 
 
-@command(parent=subparser)
+@command(
+    [
+        argument("--show-excluded", help="Show excluded buckets", action="store_true"),
+        argument("--show-obsolete", help="Show obsolete bucklets", action="store_true"),
+        argument(
+            "--only-enabled",
+            help="Show only backup enabled buckets",
+            action="store_true",
+        ),
+    ],
+    parent=subparser,
+)
 def buckets(config: dict, args: NameError) -> None:
     _logger.debug("Listing buckets")
     s3 = config.pop("s3")
@@ -202,4 +213,9 @@ def buckets(config: dict, args: NameError) -> None:
         user=config["s3ben"].pop("user"),
         s3_client=s3_events,
     )
-    backup.list_buckets(exclude=exclude)
+    backup.list_buckets(
+        exclude=exclude,
+        show_excludes=args.show_excluded,
+        show_obsolete=args.show_obsolete,
+        only_enabled=args.only_enabled,
+    )

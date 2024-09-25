@@ -67,7 +67,7 @@ class ProgressBar:
     _time_left = "[LEFT: {0:0>2}:{1:0>2}:{2:0>2}]"
     _running = "[RUN: {0:0>2}:{1:0>2}:{2:0>2}]"
     _progress = "[{:{done_marker}>{done_size}}{}{:{base_marker}>{left_size}}]"
-    _total_progress_int = "[S:{4:>7}{6:1}|DL:{5:6}{7:1}|{0:>7}/{2:<.2f}{3:<1}]"
+    _total_progress_int = "[S:{4:>7}{6:1}|DL:{5:6}{7:1}|{0:>7}{1:1}/{2:<.2f}{3:<1}]"
     _completed: float = 0
     _skipped: float = 0
     _download: float = 0

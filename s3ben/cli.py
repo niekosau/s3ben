@@ -152,6 +152,8 @@ def consume(config: dict, args: Namespace) -> None:
             type=int,
             default=4,
         ),
+        argument("--skip-checksum", help="Skip checksum check", action="store_true"),
+        argument("--skip-filesize", help="Skip filesize check", action="store_true"),
         argument(
             "--page-size",
             help="Bucket object page size, default: %(default)s",
@@ -186,7 +188,14 @@ def sync(config: dict, args: Namespace):
         s3_client=s3_events,
         curses=args.ui,
     )
-    backup.sync_bucket(args.bucket, args.transfers, args.page_size, args.checkers)
+    backup.sync_bucket(
+        args.bucket,
+        args.transfers,
+        args.page_size,
+        args.checkers,
+        args.skip_checksum,
+        args.skip_filesize,
+    )
 
 
 @command(

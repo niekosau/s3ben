@@ -88,7 +88,13 @@ class BackupManager:
                 progress.draw()
 
     def sync_bucket(
-        self, bucket_name: str, threads: int, page_size: int, checkers: int
+        self,
+        bucket_name: str,
+        threads: int,
+        page_size: int,
+        checkers: int,
+        skip_checksum: bool,
+        skip_filesize: bool,
     ) -> None:
         _logger.info("Starting bucket sync")
         start = time.perf_counter()
@@ -105,7 +111,13 @@ class BackupManager:
         reader.start()
         processess = []
         for _ in range(checkers):
-            verify = multiprocessing.Process(target=self._page_verfication)
+            verify = multiprocessing.Process(
+                target=self._page_verfication,
+                args=(
+                    skip_checksum,
+                    skip_filesize,
+                ),
+            )
             processess.append(verify)
         for _ in range(threads):
             download = multiprocessing.Process(target=self._page_processor)
@@ -142,7 +154,6 @@ class BackupManager:
                 ui.progress(progress=ui._progress + data)
 
     def _page_reader(self) -> None:
-
         _logger.info("Starting page processing")
         self._end_event.clear()
         paginator = self._s3_client.client_s3.get_paginator("list_objects_v2")
@@ -155,7 +166,7 @@ class BackupManager:
         _logger.debug("Finished reading pages")
         self._end_event.set()
 
-    def _page_verfication(self) -> None:
+    def _page_verfication(self, skip_checksum: bool, skip_filesize: bool) -> None:
         """
         Method to verify file by comparing size and checksum
         :returns: None
@@ -179,16 +190,39 @@ class BackupManager:
                     if not ob_key_exists:
                         download_list.append(obj_key)
                         continue
-                    obj_sum = obj.get("ETag")
-                    obj_sum_matches = self.__check_md5(path=fp_key, md5=obj_sum)
-                    if not obj_sum_matches:
-                        download_list.append(obj_key)
-                        continue
+                    if not skip_checksum:
+                        obj_sum = obj.get("ETag")
+                        obj_sum_matches = self.__check_md5(path=fp_key, md5=obj_sum)
+                        if not obj_sum_matches:
+                            download_list.append(obj_key)
+                            continue
+                    if not skip_filesize:
+                        obj_size = obj.get("Size")
+                        obj_size_matches = self.__check_file_size(
+                            path=fp_key, size=obj_size
+                        )
+                        if not obj_size_matches:
+                            download_list.append(obj_key)
+                            continue
                 skipped = len(data) - len(download_list)
                 progress_update = {"skipped": skipped}
                 self._progress_queue.put(progress_update)
                 if len(download_list) > 0:
                     self._download_queue.put(download_list)
+
+    def __check_file_size(self, path: str, size: int) -> bool:
+        """
+        Method to check if file size matches
+        :param str path: full path to the file
+        :param int size: size of remote object to verify
+        :return: True if matches, otherwise False
+        """
+        _logger.debug(f"Checking file size {path}")
+        local_size = os.stat(path=path).st_size
+        if local_size == size:
+            return True
+        return False
+        raise SystemExit
 
     def __check_file(self, path: str) -> bool:
         """

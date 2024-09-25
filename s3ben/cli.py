@@ -142,7 +142,13 @@ def consume(config: dict, args: Namespace) -> None:
         argument("--bucket", required=True, help="Bucket name which to sync", type=str),
         argument(
             "--transfers",
-            help="Number of transfer processes, default: %(default)i",
+            help="Number of transfer processes, default: %(default)d",
+            type=int,
+            default=4,
+        ),
+        argument(
+            "--checkers",
+            help="Number of checker processes, default: %(default)d",
             type=int,
             default=4,
         ),
@@ -150,7 +156,7 @@ def consume(config: dict, args: Namespace) -> None:
             "--page-size",
             help="Bucket object page size, default: %(default)s",
             type=int,
-            default=2000,
+            default=1000,
         ),
         argument(
             "--ui",
@@ -180,7 +186,7 @@ def sync(config: dict, args: Namespace):
         s3_client=s3_events,
         curses=args.ui,
     )
-    backup.sync_bucket(args.bucket, args.transfers, args.page_size)
+    backup.sync_bucket(args.bucket, args.transfers, args.page_size, args.checkers)
 
 
 @command(

@@ -88,7 +88,7 @@ class BackupManager:
                 progress.draw()
 
     def sync_bucket(
-        self, bucket_name: str, threads: int, page_size: int = 1000
+        self, bucket_name: str, threads: int, page_size: int, checkers: int
     ) -> None:
         _logger.info("Starting bucket sync")
         start = time.perf_counter()
@@ -100,13 +100,14 @@ class BackupManager:
         self._verify_queue = proc_manager.Queue(maxsize=threads * 2)
         self._progress_queue = proc_manager.Queue()
         self._end_event = proc_manager.Event()
-        self._barrier = proc_manager.Barrier(threads)
+        self._barrier = proc_manager.Barrier(threads + checkers)
         reader = multiprocessing.Process(target=self._page_reader)
         reader.start()
         processess = []
-        for _ in range(threads):
+        for _ in range(checkers):
             verify = multiprocessing.Process(target=self._page_verfication)
             processess.append(verify)
+        for _ in range(threads):
             download = multiprocessing.Process(target=self._page_processor)
             processess.append(download)
         for proc in processess:
@@ -160,13 +161,13 @@ class BackupManager:
         :returns: None
         """
         _logger.debug("Running page verification")
+        self._barrier.wait()
         while True:
             try:
                 data = self._verify_queue.get(block=False)
             except Empty:
                 if self._end_event.is_set():
                     break
-                time.sleep(0.1)
             else:
                 download_list = []
                 for obj in data:

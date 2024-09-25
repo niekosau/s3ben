@@ -142,10 +142,6 @@ class S3Events:
 
     def __decuple_download(self, input: tuple) -> None:
         bucket, path = input
-        full_path = os.path.join(self._download, bucket, path)
-        if os.path.isfile(full_path):
-            _logger.warning(f"{path} object exists, skipping")
-            return
         self.download_object(bucket, path)
 
     def download_object(self, bucket: str, path: str):

@@ -3,7 +3,6 @@ import os
 import pwd
 import sys
 from datetime import datetime
-from typing import Union
 
 from s3ben.constants import SIZE_UNITS, UNITS
 
@@ -68,9 +67,10 @@ class ProgressBar:
     _time_left = "[LEFT: {0:0>2}:{1:0>2}:{2:0>2}]"
     _running = "[RUN: {0:0>2}:{1:0>2}:{2:0>2}]"
     _progress = "[{:{done_marker}>{done_size}}{}{:{base_marker}>{left_size}}]"
-    _total_progress = "[{0:>6.2f}{1:1}/{2:<.2f}{3:<1}]"
-    _total_progress_int = "[{0:>7d}/{2:<.2f}{3:<1}]"
-    _completed: float = 0.00
+    _total_progress_int = "[S:{4:>7}{6:1}|DL:{5:6}{7:1}|{0:>7}/{2:<.2f}{3:<1}]"
+    _completed: float = 0
+    _skipped: float = 0
+    _download: float = 0
     current_marker: list = ["-", "\\", "|", "/"]
     filler_marker: str = "."
     bar_length: int = 0
@@ -98,7 +98,9 @@ class ProgressBar:
         self.run_time = self._running.format(0, 0, 0)
         self._run_time = datetime.now()
         self.speed = self._speed.format(0, "b")
-        self.total_progress = self._total_progress.format(0, "", 0, "")
+        self.total_progress = self._total_progress_int.format(
+            0, "", 0, "", 0, 0, "", ""
+        )
         self.show_runtime: bool = show_runtime
         self.show_transfer: bool = show_transfer
         self.avg_speed = 0
@@ -130,22 +132,20 @@ class ProgressBar:
     def __total_progress(self) -> None:
         progress, units = convert_to_human(self.progress)
         total, t_units = convert_to_human(self._total)
+        skipped, s_units = convert_to_human(self._skipped)
+        downloaded, d_units = convert_to_human(self._download)
         if not units:
             units = ""
-        if units == "":
-            self.total_progress = self._total_progress_int.format(
-                int(progress),
-                units,
-                total,
-                t_units,
-            )
-        else:
-            self.total_progress = self._total_progress.format(
-                progress,
-                units,
-                total,
-                t_units,
-            )
+        self.total_progress = self._total_progress_int.format(
+            progress,
+            units,
+            total,
+            t_units,
+            skipped,
+            downloaded,
+            s_units,
+            d_units,
+        )
 
     def __run_time(self) -> None:
         self._run_time = datetime.now() - self.time_start
@@ -262,14 +262,18 @@ class ProgressBar:
         return self._completed
 
     @progress.setter
-    def progress(self, progress: float) -> None:
+    def progress(self, data: dict) -> None:
         """
         Update progress done percentage
         """
-        if float(progress):
-            self._completed = float(progress)
-        else:
-            raise ValueError("Progress must be int or float")
+        if "skipped" in data.keys():
+            skipped = data.get("skipped")
+            self._skipped += skipped
+            self._completed += skipped
+        if "downloaded" in data.keys():
+            download = data.get("downloaded")
+            self._download += download
+            self._completed += download
 
     @property
     def total(self):

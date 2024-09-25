@@ -1,3 +1,4 @@
+import hashlib
 import multiprocessing
 import os
 import shutil
@@ -49,7 +50,8 @@ class BackupManager:
         self._bucket_name: str = None
         self._page_size: int = None
         self._progress_queue = None
-        self._exchange_queue = None
+        self._download_queue = None
+        self._verify_queue = None
         self._end_event = None
         self._barrier = None
         self._curses = curses
@@ -82,11 +84,17 @@ class BackupManager:
                 progress.draw()
                 continue
             else:
-                progress.progress += data
+                progress.progress = data
                 progress.draw()
 
     def sync_bucket(
-        self, bucket_name: str, threads: int, page_size: int = 1000
+        self,
+        bucket_name: str,
+        threads: int,
+        page_size: int,
+        checkers: int,
+        skip_checksum: bool,
+        skip_filesize: bool,
     ) -> None:
         _logger.info("Starting bucket sync")
         start = time.perf_counter()
@@ -94,16 +102,26 @@ class BackupManager:
         self._bucket_name = bucket_name
         proc_manager = multiprocessing.managers.SyncManager()
         proc_manager.start()
-        self._exchange_queue = proc_manager.Queue(maxsize=threads * 2)
+        self._download_queue = proc_manager.Queue(maxsize=threads * 2)
+        self._verify_queue = proc_manager.Queue(maxsize=threads * 2)
         self._progress_queue = proc_manager.Queue()
         self._end_event = proc_manager.Event()
-        self._barrier = proc_manager.Barrier(threads)
+        self._barrier = proc_manager.Barrier(threads + checkers)
         reader = multiprocessing.Process(target=self._page_reader)
         reader.start()
         processess = []
+        for _ in range(checkers):
+            verify = multiprocessing.Process(
+                target=self._page_verfication,
+                args=(
+                    skip_checksum,
+                    skip_filesize,
+                ),
+            )
+            processess.append(verify)
         for _ in range(threads):
-            proc = multiprocessing.Process(target=self._page_processor)
-            processess.append(proc)
+            download = multiprocessing.Process(target=self._page_processor)
+            processess.append(download)
         for proc in processess:
             proc.start()
         processess.append(reader)
@@ -144,9 +162,94 @@ class BackupManager:
             Bucket=self._bucket_name, PaginationConfig=page_config
         )
         for page in pages:
-            self._exchange_queue.put(page["Contents"])
+            self._verify_queue.put(page["Contents"])
         _logger.debug("Finished reading pages")
         self._end_event.set()
+
+    def _page_verfication(self, skip_checksum: bool, skip_filesize: bool) -> None:
+        """
+        Method to verify file by comparing size and checksum
+        :returns: None
+        """
+        _logger.debug("Running page verification")
+        self._barrier.wait()
+        while True:
+            try:
+                data = self._verify_queue.get(block=False)
+            except Empty:
+                if self._end_event.is_set():
+                    break
+            else:
+                download_list = []
+                for obj in data:
+                    obj_key = obj.get("Key")
+                    fp_key = os.path.join(
+                        self._backup_root, "active", self._bucket_name, obj_key
+                    )
+                    ob_key_exists = self.__check_file(path=fp_key)
+                    if not ob_key_exists:
+                        download_list.append(obj_key)
+                        continue
+                    if not skip_checksum:
+                        obj_sum = obj.get("ETag")
+                        obj_sum_matches = self.__check_md5(path=fp_key, md5=obj_sum)
+                        if not obj_sum_matches:
+                            download_list.append(obj_key)
+                            continue
+                    if not skip_filesize:
+                        obj_size = obj.get("Size")
+                        obj_size_matches = self.__check_file_size(
+                            path=fp_key, size=obj_size
+                        )
+                        if not obj_size_matches:
+                            download_list.append(obj_key)
+                            continue
+                skipped = len(data) - len(download_list)
+                progress_update = {"skipped": skipped}
+                self._progress_queue.put(progress_update)
+                if len(download_list) > 0:
+                    self._download_queue.put(download_list)
+
+    def __check_file_size(self, path: str, size: int) -> bool:
+        """
+        Method to check if file size matches
+        :param str path: full path to the file
+        :param int size: size of remote object to verify
+        :return: True if matches, otherwise False
+        """
+        _logger.debug(f"Checking file size {path}")
+        local_size = os.stat(path=path).st_size
+        if local_size == size:
+            return True
+        return False
+        raise SystemExit
+
+    def __check_file(self, path: str) -> bool:
+        """
+        Method to check if local file exists
+        :return: True if file exisrts, otherwise false
+        """
+        _logger.debug(f"Checking if file exists: {path}")
+        if os.path.isfile(path=path):
+            return True
+        return False
+
+    def __check_md5(self, path: str, md5: str) -> bool:
+        """
+        Method to calculate file md5 sum and check if it matches
+        :param str path: full path to the local file
+        :param str md5: md5 to check against
+        :return: True if sum maches, otherwise false
+        """
+        _logger.debug(f"Checking md5sum for {path}")
+        with open(path, "rb") as file:
+            source_md5 = hashlib.md5()
+            while chunk := file.read(8192):
+                source_md5.update(chunk)
+        calculated_md5 = source_md5.hexdigest()
+        if calculated_md5 == md5.replace('"', ""):
+            return True
+        return False
 
     def _page_processor(self) -> None:
         proc = multiprocessing.current_process().name
@@ -154,15 +257,15 @@ class BackupManager:
         self._barrier.wait()
         while True:
             try:
-                data = self._exchange_queue.get(block=False)
+                data = self._download_queue.get(block=False)
             except Empty:
                 if self._end_event.is_set():
                     break
                 continue
             else:
-                keys = [i.get("Key") for i in data]
-                self._s3_client.download_all_objects(self._bucket_name, keys)
-                self._progress_queue.put(len(keys))
+                self._s3_client.download_all_objects(self._bucket_name, data)
+                progress_update = {"downloaded": len(data)}
+                self._progress_queue.put(progress_update)
 
     def list_buckets(
         self,

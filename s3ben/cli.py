@@ -204,7 +204,7 @@ def sync(config: dict, args: Namespace):
     ],
     parent=subparser,
 )
-def buckets(config: dict, args: NameError) -> None:
+def buckets(config: dict, args: Namespace) -> None:
     _logger.debug("Listing buckets")
     s3 = config.pop("s3")
     exclude = s3.pop("exclude").replace('"', "").replace("'", "").split(",")
@@ -230,3 +230,28 @@ def buckets(config: dict, args: NameError) -> None:
         sort=args.sort,
         sort_revers=args.sort_reverse,
     )
+
+
+@command(
+    [
+        argument(
+            "--days-keep",
+            help="How long to keep, default: %(default)d",
+            default=30,
+            type=int,
+        )
+    ],
+    parent=subparser,
+)
+def cleanup(config: dict, args: Namespace) -> None:
+    """
+    Cli function to call deleted items cleanup method
+    from BackupManager
+    """
+    _logger.debug("Starting deleted items cleanup")
+    backup_root = config["s3ben"].pop("backup_root")
+    backup = BackupManager(
+        backup_root=backup_root,
+        user=config["s3ben"].pop("user"),
+    )
+    backup.cleanup_deleted_items(days=args.days_keep)

@@ -59,7 +59,7 @@ class BackupManager:
         signal.signal(signal.SIGINT, self.__exit)
 
     def __exit(self, signal_no, stack_frame) -> None:
-        raise SystemExit("Exiting")
+        raise SystemExit()
 
     def start_consumer(self, s3_client: S3Events) -> None:
         _logger.debug(f"Dropping privileges to {self._user}")

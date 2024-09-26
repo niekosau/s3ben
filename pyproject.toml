@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "s3ben"
-version = "0.5.2"
+version = "0.5.3"
 description = "S3 bucket backup using notification"
 authors = ["Arunas Grigalionis <arunas.grigalionis@gmail.com>"]
 readme = "README.md"
@@ -15,6 +15,9 @@ tabulate = "^0.9.0"
 
 [tool.poetry.scripts]
 s3ben = 's3ben.cli:main'
+
+[tool.poetry.group.dev.dependencies]
+debugpy = "^1.8.6"
 
 [build-system]
 requires = ["poetry-core"]

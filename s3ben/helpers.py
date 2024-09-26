@@ -107,7 +107,6 @@ class ProgressBar:
         self.terminal_size = os.get_terminal_size().columns
 
     def __split_time(self, seconds: int) -> tuple:
-        time.sleep(0.1)
         hours = math.floor(seconds / 3600)
         minutes = math.floor(seconds / 60) - (hours * 60)
         seconds = math.floor(seconds - ((hours * 3660) + (minutes * 60)))

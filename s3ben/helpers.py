@@ -81,7 +81,7 @@ class ProgressBar:
         self.terminal_size: int = os.get_terminal_size().columns
         self.percents: str = self._percents.format(0)
         self.show_numbers: bool = False
-        self.time_start = time.perf_counter()
+        self.time_start = int(time.perf_counter())
         self.time_left = self._time_left.format(99, 59, 59)
         self.run_time = self._running.format(0, 0, 0)
         self._run_time = datetime.now()
@@ -101,7 +101,7 @@ class ProgressBar:
         return self.current_marker[-1]
 
     def __run_time(self) -> None:
-        self._run_time = time.perf_counter() - self.time_start
+        self._run_time = int(time.perf_counter()) - self.time_start
 
     def __update_terminal_size(self) -> None:
         self.terminal_size = os.get_terminal_size().columns
@@ -117,7 +117,10 @@ class ProgressBar:
         self.run_time = self._running.format(r_time[0], r_time[1], r_time[2])
 
     def __update_avg_speed(self) -> None:
-        self.avg_speed = self.progress // self._run_time
+        try:
+            self.avg_speed = self.progress / self._run_time
+        except ZeroDivisionError:
+            self.avg_speed = 0
 
     def __calculate_estimate(self) -> None:
         run_data_left = self.total - self.progress

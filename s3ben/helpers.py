@@ -109,7 +109,7 @@ class ProgressBar:
     def __split_time(self, seconds: int) -> tuple:
         hours = math.floor(seconds / 3600)
         minutes = math.floor(seconds / 60) - (hours * 60)
-        seconds = math.floor(seconds - ((hours * 3660) + (minutes * 60)))
+        seconds = math.floor(seconds - ((hours * 3600) + (minutes * 60)))
         return (hours, minutes, seconds)
 
     def __update_run_time(self) -> None:

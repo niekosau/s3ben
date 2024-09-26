@@ -125,7 +125,8 @@ def init_consumer(config: dict) -> None:
 
 @command(parent=subparser)
 def consume(config: dict, args: Namespace) -> None:
-    num_proc = config["s3ben"].get("process")
+    s3ben_config: dict = config.get("s3ben")
+    num_proc = config.get("process") if "process" in s3ben_config.keys() else 8
     processes = []
     for _ in range(int(num_proc)):
         process = multiprocessing.Process(target=init_consumer, args=(config,))

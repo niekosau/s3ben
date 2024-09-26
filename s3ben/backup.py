@@ -126,17 +126,12 @@ class BackupManager:
             proc.start()
         processess.append(reader)
         if not self._curses:
-            progress = multiprocessing.Process(target=self._progress)
-            progress.start()
-            processess.append(progress)
+            self._progress()
         else:
-            ui = multiprocessing.Process(target=self._curses_ui)
-            ui.start()
-            processess.append(ui)
+            self._curses_ui()
         for proc in processess:
             proc.join()
         proc_manager.shutdown()
-        proc_manager.join()
         end = time.perf_counter()
         _logger.info(f"Sync took: {round(end - start, 2)} seconds")
 

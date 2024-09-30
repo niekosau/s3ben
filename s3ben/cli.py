@@ -89,7 +89,7 @@ def setup(config: dict, args: Namespace) -> None:
         mq_virtualhost=mq_virtualhost,
     )
     for bucket in filtered_buckets:
-        _logger.debug(f"Setting up bucket: {bucket}")
+        _logger.debug("Setting up bucket: %s", bucket)
         s3_events.create_notification(bucket=bucket, exchange=exchange)
 
 

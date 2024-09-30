@@ -138,7 +138,7 @@ class S3Events:
         try:
             return self.client_admin.get_bucket(bucket=bucket)
         except rgwadmin.exceptions.NoSuchBucket:
-            _logger.warning(f"Bucket {bucket} not found")
+            _logger.warning("Bucket %s not found", bucket)
             sys.exit()
 
     def __decuple_download(self, input: tuple) -> None:
@@ -179,20 +179,21 @@ class S3Events:
         :param str path: object path which should be moved
         :return: None
         """
-        _logger.info(f"Moving {path} to deleted items for bucket: {bucket}")
+        _logger.info("Moving %s to deleted items for bucket: %s", path, bucket)
         current_date = datetime.date.today().strftime("%Y-%m-%d")
         dest = os.path.dirname(os.path.join(self._remove, current_date, bucket, path))
         src = os.path.join(self._download, bucket, path)
         file_name = os.path.basename(path)
         d_file = os.path.join(dest, file_name)
         if not os.path.exists(src):
-            _logger.warning(f"{src} doesn't exist")
+            _logger.warning("%s doesn't exist", src)
             return
         if not os.path.exists(dest):
             os.makedirs(dest)
         if os.path.isfile(d_file):
             _logger.warning(
-                f"Removing {d_file} as another with same name must be moved to deleted items"
+                "Removing %s as another with same name must be moved to deleted items",
+                d_file,
             )
             os.remove(d_file)
         shutil.move(src, dest)

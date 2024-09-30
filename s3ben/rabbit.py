@@ -129,7 +129,7 @@ class RabbitMQ:
         :param pika.channel.Channel: The closed channel
         :param Exception reason: why the channel was closed
         """
-        _logger.warning(f"Channel {channel} was closed: {reason}")
+        _logger.warning("Channel %s was closed: %s", channel, reason)
         self.close_connection()
 
     def close_connection(self) -> None:
@@ -153,7 +153,7 @@ class RabbitMQ:
         :param pika.SelectConnection _unused_connection: The connection
         :param Exception err: The error
         """
-        _logger.error(f"Connection open failed: {err}")
+        _logger.error("Connection open failed: %s", err)
         self.reconnect()
 
     def reconnect(self) -> None:
@@ -209,7 +209,7 @@ class RabbitMQ:
         """
         self._consuming = False
         _logger.debug(
-            f"RabbitMQ acknowledged the cancellation of the consumer: {userdata}"
+            "RabbitMQ acknowledged the cancellation of the consumer: %s", userdata
         )
         self.close_channel()
 
@@ -235,7 +235,7 @@ class RabbitMQ:
         if self._closing:
             self._connection.ioloop.stop()
             return
-        _logger.warning(f"Connection closed, reconnecting because: {reason}")
+        _logger.warning("Connection closed, reconnecting because: %s", reason)
         self.reconnect()
 
     def on_channel_closed(self, channel, reason) -> None:
@@ -249,7 +249,7 @@ class RabbitMQ:
         :param pika.channel.Channel: The closed channel
         :param Exception reason: why the channel was closed
         """
-        _logger.warning(f"Channel {channel} was closed: {reason}")
+        _logger.warning("Channel %s was closed: %s", channel, reason)
         self.close_connection()
 
     def setup_queue(self, queue) -> None:
@@ -259,7 +259,7 @@ class RabbitMQ:
 
         :param str|unicode queue_name: The name of the queue to declare.
         """
-        _logger.debug(f"Creating queue: {queue}")
+        _logger.debug("Creating queue: %s", queue)
         self._queue = queue
         self._channel.queue_declare(
             queue=self._queue,
@@ -269,7 +269,9 @@ class RabbitMQ:
         )
 
     def quene_bind(self, routing_key: str) -> None:
-        _logger.debug(f"Binding {self._exchange} to {self._queue} with {routing_key}")
+        _logger.debug(
+            "Binding %s to %s with %s", self._exchange, self._queue, routing_key
+        )
         self._channel.queue_bind(
             queue=self._queue, exchange=self._exchange, routing_key=routing_key
         )
@@ -281,7 +283,7 @@ class RabbitMQ:
 
         :param str|unicode exchange_name: The name of the exchange to declare
         """
-        _logger.debug(f"Declaring exhange {exchange}")
+        _logger.debug("Declaring exhange %s", exchange)
         self._exchange = exchange
         self._channel.exchange_declare(
             exchange=self._exchange,
@@ -322,7 +324,7 @@ class RabbitMQ:
 
         :param pika.frame.Method method_frame: The Basic.Cancel frame
         """
-        _logger.info(f"Consumer canceled, shuting down {method_frame}")
+        _logger.info("Consumer canceled, shuting down %s", method_frame)
         if self._channel:
             self._channel.close()
 
@@ -349,7 +351,11 @@ class RabbitMQ:
             bucket = record["s3"]["bucket"]["name"]
             obj_key = record["s3"]["object"]["key"]
             _logger.debug(
-                f"Bucket: {bucket} event: {event} file: {obj_key} size: {obj_size}"
+                "Bucket: %s event: %s file: %s size: %s",
+                bucket,
+                event,
+                obj_key,
+                obj_key,
             )
             action = self.__bucket_event(event=event)
             if action == "download":
@@ -385,7 +391,7 @@ class RabbitMQ:
 
         :param int delivery_tag: The delivery tag from the Basic.Deliver frame
         """
-        _logger.debug(f"Ack message: {delivery_tag}")
+        _logger.debug("Ack message: %s", delivery_tag)
         self._channel.basic_ack(delivery_tag)
 
     def on_basic_qos_ok(self, _unused_frame):
@@ -406,7 +412,7 @@ class RabbitMQ:
         with different prefetch values to achieve desired performance.
 
         """
-        _logger.debug(f"Setting prefetch: {self._prefetch_count}")
+        _logger.debug("Setting prefetch: %s", self._prefetch_count)
         self._channel.basic_qos(
             prefetch_count=self._prefetch_count, callback=self.on_basic_qos_ok
         )

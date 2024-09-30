@@ -66,7 +66,7 @@ class BackupManager:
         raise SystemExit()
 
     def start_consumer(self, s3_client: S3Events) -> None:
-        _logger.debug(f"Dropping privileges to {self._user}")
+        _logger.debug("Dropping privileges to %s", self._user)
         drop_privileges(user=self._user)
         try:
             self._mq.consume(queue=self._mq_queue, s3_client=s3_client)
@@ -143,7 +143,7 @@ class BackupManager:
         finally:
             proc_manager.shutdown()
         end = time.perf_counter()
-        _logger.info(f"Sync took: {round(end - start, 2)} seconds")
+        _logger.info("Sync took: %s seconds", round(end - start, 2))
 
     def _curses_ui(self) -> None:
         info = self._s3_client.get_bucket(self._bucket_name)
@@ -253,7 +253,7 @@ class BackupManager:
         :param int size: size of remote object to verify
         :return: True if matches, otherwise False
         """
-        _logger.debug(f"Checking file size {path}")
+        _logger.debug("Checking file size %s", path)
         local_size = os.stat(path=path).st_size
         if local_size == size:
             return True
@@ -264,7 +264,7 @@ class BackupManager:
         Method to check if local file exists
         :return: True if file exisrts, otherwise false
         """
-        _logger.debug(f"Checking if file exists: {path}")
+        _logger.debug("Checking if file exists: %s", path)
         if os.path.isfile(path=path):
             return True
         return False
@@ -276,7 +276,7 @@ class BackupManager:
         :param str md5: md5 to check against
         :return: True if sum maches, otherwise false
         """
-        _logger.debug(f"Checking md5sum for {path}")
+        _logger.debug("Checking md5sum for %s", path)
         with open(path, "rb") as file:
             source_md5 = hashlib.md5()
             while chunk := file.read(8192):
@@ -288,7 +288,7 @@ class BackupManager:
 
     def _page_processor(self) -> None:
         proc = multiprocessing.current_process().name
-        _logger.debug(f"Running: {proc}")
+        _logger.debug("Running: %s", proc)
         self._barrier.wait()
         while True:
             try:
@@ -387,7 +387,7 @@ class BackupManager:
             if dir_date > date_to_remove:
                 continue
             to_remove = os.path.join(deleted_path, dir)
-            _logger.debug(f"Removing {to_remove}")
+            _logger.debug("Removing %s", to_remove)
             shutil.rmtree(path=to_remove)
         _logger.debug("Cleanup done")
 

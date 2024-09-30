@@ -14,7 +14,7 @@ def parse_config(file: Path) -> dict:
     """
     if not os.path.exists(file):
         raise ValueError(f"Config {file} not found")
-    _logger.debug(f"Parsing {file}")
+    _logger.debug("Parsing %s", file)
     config = configparser.RawConfigParser()
     with open(file=file) as f:
         config.readfp(f)

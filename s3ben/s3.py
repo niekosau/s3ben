@@ -168,6 +168,7 @@ class S3Events:
         except botocore.exceptions.ClientError as err:
             if err.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
                 _logger.warning("%s not found in bucket: %s", path, bucket)
+                return
         _logger.info("Downloading: %s:%s to %s", bucket, s3_obj, destination)
         self.client_s3.download_file(Bucket=bucket, Key=s3_obj, Filename=destination)
 

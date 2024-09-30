@@ -5,7 +5,7 @@ from argparse import Namespace
 from logging import getLogger
 
 from s3ben.arguments import base_args
-from s3ben.backup import BackupManager
+from s3ben.backup import BackupManager, ResolveRemmaping
 from s3ben.config import parse_config
 from s3ben.decorators import argument, command
 from s3ben.logger import init_logger
@@ -126,13 +126,13 @@ def init_consumer(config: dict) -> None:
 @command(parent=subparser)
 def consume(config: dict, args: Namespace) -> None:
     s3ben_config: dict = config.get("s3ben")
-    num_proc = config.get("process") if "process" in s3ben_config.keys() else 8
+    num_proc = s3ben_config.get("process") if "process" in s3ben_config.keys() else 8
     processes = []
     for _ in range(int(num_proc)):
         process = multiprocessing.Process(target=init_consumer, args=(config,))
         processes.append(process)
     for proc in processes:
-        _logger.debug(f"Starting process {proc}")
+        _logger.debug("Starting process: %s", proc)
         proc.start()
     for proc in processes:
         proc.join()
@@ -271,3 +271,32 @@ def cleanup(config: dict, args: Namespace) -> None:
         user=config["s3ben"].pop("user"),
     )
     backup.cleanup_deleted_items(days=args.days_keep)
+
+
+@command(parent=subparser)
+def test(config: dict, args: Namespace) -> None:
+    import multiprocessing
+    import time
+
+    backup_root = config["s3ben"].get("backup_root")
+    queue_data = {
+        "action": "update",
+        "data": {"bucket": "test", "remap": {"somekey": "_alternate_/somekey"}},
+    }
+    remmaping = ResolveRemmaping(backup_root=backup_root)
+    event = multiprocessing.Event()
+    queue = multiprocessing.Queue()
+    process = multiprocessing.Process(
+        target=remmaping.run,
+        args=(
+            queue,
+            event,
+        ),
+    )
+    process.start()
+    time.sleep(1.2)
+    queue.put_nowait(queue_data)
+    time.sleep(2)
+    event.set()
+
+    # remmaping.update_remapping("test2", remap)

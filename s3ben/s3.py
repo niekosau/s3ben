@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 from logging import getLogger
+from typing import Union
 
 import boto3
 import botocore
@@ -137,32 +138,38 @@ class S3Events:
         try:
             return self.client_admin.get_bucket(bucket=bucket)
         except rgwadmin.exceptions.NoSuchBucket:
-            _logger.error(f"Bucket {bucket} not found")
+            _logger.warning(f"Bucket {bucket} not found")
             sys.exit()
 
     def __decuple_download(self, input: tuple) -> None:
         bucket, path = input
         self.download_object(bucket, path)
 
-    def download_object(self, bucket: str, path: str):
+    def download_object(self, bucket: str, path: Union[str, dict]):
         """
         Get an object from a bucket
 
         :param str bucket: Bucket name from which to get object
         :param str path: object path
         """
-        destination = os.path.join(self._download, bucket, path)
-        dir = os.path.dirname(destination)
-        if not os.path.exists(dir):
-            os.makedirs(dir, exist_ok=True)
+
+        s3_obj = path
+        if isinstance(path, dict):
+            dst = next(iter(path.values()))
+            s3_obj = "/" + next(iter(path.keys()))
+            destination = os.path.join(self._download, bucket, dst)
+        else:
+            destination = os.path.join(self._download, bucket, path)
+        dst_dir = os.path.dirname(destination)
+        if not os.path.exists(dst_dir):
+            os.makedirs(dst_dir, exist_ok=True)
         try:
-            self.client_s3.head_object(Bucket=bucket, Key=path)
+            self.client_s3.head_object(Bucket=bucket, Key=s3_obj)
         except botocore.exceptions.ClientError as err:
             if err.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
-                _logger.warning(f"{path} not found in bucket: {bucket}")
-        else:
-            _logger.info(f"Downloading {bucket}:{path}")
-            self.client_s3.download_file(Bucket=bucket, Key=path, Filename=destination)
+                _logger.warning("%s not found in bucket: %s", path, bucket)
+        _logger.info("Downloading: %s:%s to %s", bucket, s3_obj, destination)
+        self.client_s3.download_file(Bucket=bucket, Key=s3_obj, Filename=destination)
 
     def remove_object(self, bucket: str, path: str) -> None:
         """

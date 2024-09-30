@@ -271,32 +271,3 @@ def cleanup(config: dict, args: Namespace) -> None:
         user=config["s3ben"].pop("user"),
     )
     backup.cleanup_deleted_items(days=args.days_keep)
-
-
-@command(parent=subparser)
-def test(config: dict, args: Namespace) -> None:
-    import multiprocessing
-    import time
-
-    backup_root = config["s3ben"].get("backup_root")
-    queue_data = {
-        "action": "update",
-        "data": {"bucket": "test", "remap": {"somekey": "_alternate_/somekey"}},
-    }
-    remmaping = ResolveRemmaping(backup_root=backup_root)
-    event = multiprocessing.Event()
-    queue = multiprocessing.Queue()
-    process = multiprocessing.Process(
-        target=remmaping.run,
-        args=(
-            queue,
-            event,
-        ),
-    )
-    process.start()
-    time.sleep(1.2)
-    queue.put_nowait(queue_data)
-    time.sleep(2)
-    event.set()
-
-    # remmaping.update_remapping("test2", remap)

@@ -227,14 +227,12 @@ class BackupManager:
                     download_list.append(key)
                     continue
                 if not skip_checksum:
-                    print("checking checksum")
                     obj_sum = obj.get("ETag")
                     obj_sum_matches = self.__check_md5(path=fp_key, md5=obj_sum)
                     if not obj_sum_matches:
                         download_list.append(key)
                         continue
                 if not skip_filesize:
-                    print("checking file size")
                     obj_size = obj.get("Size")
                     obj_size_matches = self.__check_file_size(
                         path=fp_key, size=obj_size

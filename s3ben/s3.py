@@ -218,26 +218,25 @@ class S3Events:
         objects = self.resouce.Bucket(bucket_name).objects.all()
         return [o.key for o in objects]
 
-    def download_all_objects_v2(
-        self, baucket_name: str, step: int, page_queue: multiprocessing.Queue
-    ) -> None:
-        """
-        Download objects from page object iterating every n'th page
-        :param str bucket_name: Name of the bucket
-        :param page: bot paginator
-        :param int step: For loop step for multiprocess support
-        :param multiprocessing.Queue queu: Multiprocess queu for exchanging information
-        """
-        import time
-
-        print("Process started")
-        while True:
-            data = page_queue.get(block=True, timeout=10)
-            print(len(data[0]["Contents"]))
-            if page_queue.empty():
-                print("breaking")
-                break
-            time.sleep(0.5)
+    # def download_all_objects_v2(
+    #     self, baucket_name: str, step: int, page_queue: multiprocessing.Queue
+    # ) -> None:
+    #     """
+    #     Download objects from page object iterating every n'th page
+    #     :param str bucket_name: Name of the bucket
+    #     :param page: bot paginator
+    #     :param int step: For loop step for multiprocess support
+    #     :param multiprocessing.Queue queu: Multiprocess queu for exchanging information
+    #     """
+    #     import time
+    #
+    #     while True:
+    #         data = page_queue.get(block=True, timeout=10)
+    #         print(len(data[0]["Contents"]))
+    #         if page_queue.empty():
+    #             print("breaking")
+    #             break
+    #         time.sleep(0.5)
 
     def _check_if_object_exists(self, path):
         pass

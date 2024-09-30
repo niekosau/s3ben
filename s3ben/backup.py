@@ -1,4 +1,5 @@
 import hashlib
+import json
 import multiprocessing
 import os
 import shutil
@@ -6,7 +7,9 @@ import signal
 import time
 from datetime import datetime, timedelta
 from logging import getLogger
+from multiprocessing import Event, Queue
 from queue import Empty
+from typing import Union
 
 from tabulate import tabulate
 
@@ -52,6 +55,7 @@ class BackupManager:
         self._progress_queue = None
         self._download_queue = None
         self._verify_queue = None
+        self._remapped_queue = None
         self._end_event = None
         self._barrier = None
         self._curses = curses
@@ -105,33 +109,39 @@ class BackupManager:
         self._download_queue = proc_manager.Queue(maxsize=threads * 2)
         self._verify_queue = proc_manager.Queue(maxsize=threads * 2)
         self._progress_queue = proc_manager.Queue()
+        self._remapped_queue = proc_manager.Queue()
         self._end_event = proc_manager.Event()
         self._barrier = proc_manager.Barrier(threads + checkers)
-        reader = multiprocessing.Process(target=self._page_reader)
-        reader.start()
-        processess = []
-        for _ in range(checkers):
-            verify = multiprocessing.Process(
-                target=self._page_verfication,
-                args=(
-                    skip_checksum,
-                    skip_filesize,
-                ),
-            )
-            processess.append(verify)
-        for _ in range(threads):
-            download = multiprocessing.Process(target=self._page_processor)
-            processess.append(download)
-        for proc in processess:
-            proc.start()
-        processess.append(reader)
-        if not self._curses:
-            self._progress()
-        else:
-            self._curses_ui()
-        for proc in processess:
-            proc.join()
-        proc_manager.shutdown()
+        try:
+            reader = multiprocessing.Process(target=self._page_reader)
+            reader.start()
+            remapper = multiprocessing.Process(target=self.__remapper)
+            remapper.start()
+            processess = []
+            for _ in range(checkers):
+                verify = multiprocessing.Process(
+                    target=self._page_verfication,
+                    args=(
+                        skip_checksum,
+                        skip_filesize,
+                    ),
+                )
+                processess.append(verify)
+            for _ in range(threads):
+                download = multiprocessing.Process(target=self._page_processor)
+                processess.append(download)
+            for proc in processess:
+                proc.start()
+            processess.append(reader)
+            processess.append(remapper)
+            if not self._curses:
+                self._progress()
+            else:
+                self._curses_ui()
+            for proc in processess:
+                proc.join()
+        finally:
+            proc_manager.shutdown()
         end = time.perf_counter()
         _logger.info(f"Sync took: {round(end - start, 2)} seconds")
 
@@ -148,6 +158,14 @@ class BackupManager:
             else:
                 ui.progress(progress=ui._progress + data)
 
+    def __remapper(self) -> None:
+        """
+        Method to run remmaper class
+        :return: None
+        """
+        remap_resolver = ResolveRemmaping(backup_root=self._backup_root)
+        remap_resolver.run(queue=self._remapped_queue, event=self._end_event)
+
     def _page_reader(self) -> None:
         _logger.info("Starting page processing")
         self._end_event.clear()
@@ -161,6 +179,17 @@ class BackupManager:
         _logger.debug("Finished reading pages")
         self._end_event.set()
 
+    def __check_object(self, path) -> Union[str, dict]:
+        """
+        Check object path for forward slash and replace
+        if found as first character
+        :param str path: Object path from s3
+        """
+        if path[0] == "/":
+            _logger.error("Forward slash found as first simbol: %s", path)
+            return {path[1:]: "_forward_slash_" + path}
+        return path
+
     def _page_verfication(self, skip_checksum: bool, skip_filesize: bool) -> None:
         """
         Method to verify file by comparing size and checksum
@@ -173,37 +202,51 @@ class BackupManager:
                 data = self._verify_queue.get(block=False)
             except Empty:
                 if self._end_event.is_set():
+                    _logger.debug("Braking from queue")
                     break
-            else:
-                download_list = []
-                for obj in data:
-                    obj_key = obj.get("Key")
-                    fp_key = os.path.join(
-                        self._backup_root, "active", self._bucket_name, obj_key
+                continue
+            download_list = []
+            for obj in data:
+                obj_key = obj.get("Key")
+                key = self.__check_object(obj_key)
+                if isinstance(key, dict):
+                    remapping_update = {"action": "update"}
+                    local_path = next(iter(key.values()))
+                    remapping_update.update(
+                        {"data": {"bucket": self._bucket_name, "remap": key}}
                     )
-                    ob_key_exists = self.__check_file(path=fp_key)
-                    if not ob_key_exists:
-                        download_list.append(obj_key)
+                    self._remapped_queue.put(remapping_update)
+                else:
+                    local_path = key
+                fp_key = os.path.join(
+                    self._backup_root, "active", self._bucket_name, local_path
+                )
+                ob_key_exists = self.__check_file(path=fp_key)
+                if not ob_key_exists:
+                    _logger.debug("file doesn't exists: %s", fp_key)
+                    download_list.append(key)
+                    continue
+                if not skip_checksum:
+                    print("checking checksum")
+                    obj_sum = obj.get("ETag")
+                    obj_sum_matches = self.__check_md5(path=fp_key, md5=obj_sum)
+                    if not obj_sum_matches:
+                        download_list.append(key)
                         continue
-                    if not skip_checksum:
-                        obj_sum = obj.get("ETag")
-                        obj_sum_matches = self.__check_md5(path=fp_key, md5=obj_sum)
-                        if not obj_sum_matches:
-                            download_list.append(obj_key)
-                            continue
-                    if not skip_filesize:
-                        obj_size = obj.get("Size")
-                        obj_size_matches = self.__check_file_size(
-                            path=fp_key, size=obj_size
-                        )
-                        if not obj_size_matches:
-                            download_list.append(obj_key)
-                            continue
-                skipped = len(data) - len(download_list)
-                progress_update = {"skipped": skipped}
-                self._progress_queue.put(progress_update)
-                if len(download_list) > 0:
-                    self._download_queue.put(download_list)
+                if not skip_filesize:
+                    print("checking file size")
+                    obj_size = obj.get("Size")
+                    obj_size_matches = self.__check_file_size(
+                        path=fp_key, size=obj_size
+                    )
+                    if not obj_size_matches:
+                        download_list.append(key)
+                        continue
+            skipped = len(data) - len(download_list)
+            progress_update = {"skipped": skipped}
+            self._progress_queue.put(progress_update)
+            if len(download_list) > 0:
+                self._download_queue.put(download_list)
 
     def __check_file_size(self, path: str, size: int) -> bool:
         """
@@ -217,7 +260,6 @@ class BackupManager:
         if local_size == size:
             return True
         return False
-        raise SystemExit
 
     def __check_file(self, path: str) -> bool:
         """
@@ -252,7 +294,7 @@ class BackupManager:
         self._barrier.wait()
         while True:
             try:
-                data = self._download_queue.get(block=False)
+                data = self._download_queue.get(block=True, timeout=0.2)
             except Empty:
                 if self._end_event.is_set():
                     break
@@ -350,3 +392,67 @@ class BackupManager:
             _logger.debug(f"Removing {to_remove}")
             shutil.rmtree(path=to_remove)
         _logger.debug("Cleanup done")
+
+
+class ResolveRemmaping:
+    """
+    Class to resolve remmapped objects
+    :param str backup_root: Path to backup root
+    """
+
+    def __init__(self, backup_root: str):
+        self._queue = None
+        self._remapping_db = os.path.join(backup_root, ".remappings")
+
+    def update_remapping(self, bucket: str, remap: dict) -> None:
+        """
+        Method to update remapping database
+        :param str bucket: bucket name for which remap should be added
+        :peram dict remap: dictionary containing remapping information
+        :return: None
+        """
+        b_remaps = {}
+        if not os.path.exists(self._remapping_db):
+            _logger.warning("Remapping db doesn't exists, creating")
+            update = {bucket: remap}
+            with open(file=self._remapping_db, mode="w", encoding="utf-8") as f:
+                json.dump(update, f)
+                return
+        with open(file=self._remapping_db, mode="r", encoding="utf-8") as f:
+            remappings: dict = json.load(f)
+        if bucket in remappings.keys():
+            b_remaps = remappings.pop(bucket)
+        b_remaps.update(remap)
+        remappings.update({bucket: b_remaps})
+        with open(file=self._remapping_db, mode="w", encoding="utf-8") as f:
+            json.dump(obj=remappings, fp=f)
+
+    def run(self, queue: Queue, event: Event) -> None:
+        """
+        Method to launch Resolver as a process
+        :param multiprocess.Queue queue: multiprocess.Queue class for receiving data
+        :param multiprocess.Event event: multiprocess.Event class for receiving end event
+        :return: None
+
+        for updating remap db, dictionary must be added to queue:
+        {
+          "action": "update",
+          "data": {
+            "bucket": "bucket_name"
+            "remap": {
+              "object_key_to_match_local_file": "relative/path_to_key"
+            }
+          }
+        }
+        """
+        _logger.info("starting remapping resolver")
+        while not event.is_set():
+            try:
+                data: dict = queue.get(timeout=1)
+            except Empty:
+                if event.is_set():
+                    break
+                continue
+            if data.get("action") == "update":
+                remap = data.get("data")
+                self.update_remapping(**remap)

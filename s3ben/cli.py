@@ -288,8 +288,8 @@ def cleanup(config: dict, parsed_args: Namespace) -> None:
             help="Number of consumer processes (max limited to cpu cores), default: %(default)s",
         )
     ],
-    parent=subparser,
-)  # type: ignore
+    parent=subparser,  # type: ignore
+)
 def consume_v2(config: dict, parsed_args: Namespace) -> None:
     """
     Function to start/restart consumers and other needed processes

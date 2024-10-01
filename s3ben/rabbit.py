@@ -322,6 +322,9 @@ class RabbitMQ:
         )
 
     def quene_bind(self, routing_key: str) -> None:
+        """
+        Method to bind queue and exchange toggether.
+        """
         _logger.debug(
             "Binding %s to %s with %s", self._exchange, self._queue, routing_key
         )
@@ -411,8 +414,8 @@ class RabbitMQ:
                 obj_size,
             )
             action = self.__bucket_event(event=event)
+            key = check_object(obj_key)
             if action == "download":
-                key = check_object(obj_key)
                 if isinstance(key, dict):
                     self._download_remapped(bucket=bucket, data=key)
                 else:
@@ -421,8 +424,25 @@ class RabbitMQ:
                     )
 
             if action == "remove":
-                self._s3_client.remove_object(bucket=bucket, path=obj_key)
+                if isinstance(key, dict):
+                    self._remove_remapped(bucket=bucket, data=key)
+                else:
+                    self._s3_client.remove_object(bucket=bucket, path=obj_key)
         self.acknowledge_message(basic_deliver.delivery_tag)
+
+    def _remove_remapped(self, bucket, data: dict) -> None:
+        """
+        Remove remmaped object from active and database
+
+        :param str bucket: Bucket name
+        :param dict data: Dictionary containing remapping info
+        :rtype: None
+        """
+        _, local_path, message = remmaping_message(
+            action="remove", remap=data, bucket=bucket
+        )
+        self._s3_client.remove_object(bucket=bucket, path=local_path)
+        self._mp_data_queue.put_nowait(message)
 
     def _download_remapped(self, bucket: str, data: dict) -> None:
         """
@@ -440,15 +460,6 @@ class RabbitMQ:
         )
         if dl_status:
             self._mp_data_queue.put_nowait(message)
-
-    def _download(self, bucket: str, s3_obj: str) -> None:
-        """
-        Method to download s3 object
-
-        :param str bucket: Bucket name
-        :param str s3_obj: S3 object key
-        :rtype: None
-        """
 
     def __bucket_event(self, event: str) -> str:
         """

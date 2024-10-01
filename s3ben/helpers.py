@@ -4,9 +4,12 @@ import os
 import pwd
 import sys
 import time
-from datetime import datetime
+from logging import getLogger
+from typing import Tuple, Union
 
 from s3ben.constants import SIZE_UNITS, UNITS
+
+_logger = getLogger(__name__)
 
 
 def drop_privileges(user: str) -> None:
@@ -52,6 +55,36 @@ def convert_to_human(value: int) -> tuple:
         if unit == UNITS[-1]:
             break
     return value, unit
+
+
+def check_object(path) -> Union[str, dict]:
+    """
+    Check object path for forward slash and replace
+    if found as first character
+    :param str path: Object path from s3
+    """
+    if path[0] == "/":
+        remmpaed_obj = "_forward_slash_" + path
+        _logger.error(
+            "Forward slash found for object: %s, remmaping to: %s", path, remmpaed_obj
+        )
+        return {path[1:]: remmpaed_obj}
+    return path
+
+
+def remmaping_message(action: str, remap: dict, bucket: str) -> Tuple[str, str, dict]:
+    """
+    Function to create remmaping message
+
+    :param str action: Update or delete action
+    :param dict remap: Remmaping data
+    :param str bucket: Name of the bucket
+    """
+    remapping_update = {"action": action}
+    remapping_update.update({"data": {"bucket": bucket, "remap": remap}})
+    local_path = next(iter(remap.values()))
+    object_path = "/" + next(iter(remap.keys()))
+    return object_path, local_path, remapping_update
 
 
 class ProgressBar:

@@ -1,12 +1,48 @@
 import functools
 import json
+from dataclasses import dataclass, field
 from logging import getLogger
+from multiprocessing import Event, Queue
 
 import pika
 
+from s3ben.helpers import check_object, remmaping_message
 from s3ben.s3 import S3Events
 
 _logger = getLogger(__name__)
+
+
+@dataclass
+class MqConnection:
+    """
+    RabbitMQ dataclass to hold all required parameters in one object
+    """
+
+    host: str
+    user: str
+    password: str = field(repr=False)
+    port: int
+    virtualhost: str
+    conn_params: pika.ConnectionParameters = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        logins = pika.credentials.PlainCredentials(self.user, self.password)
+        self.conn_params = pika.ConnectionParameters(
+            host=self.host,
+            port=self.port,
+            virtual_host=self.virtualhost,
+            credentials=logins,
+        )
+
+
+@dataclass
+class MqExQue:
+    """
+    Dataclas for Exchange and queue definition
+    """
+
+    exchange: str
+    queue: str
 
 
 class RabbitMQ:
@@ -19,16 +55,8 @@ class RabbitMQ:
     :param str virtualhost: virtual host to connect, default: /
     """
 
-    def __init__(
-        self, hostname: str, user: str, password: str, port: int, virtualhost: str
-    ) -> None:
-        mq_credentials = pika.credentials.PlainCredentials(user, password)
-        self.mq_params = pika.ConnectionParameters(
-            host=hostname,
-            port=port,
-            virtual_host=virtualhost,
-            credentials=mq_credentials,
-        )
+    def __init__(self, conn_params: pika.ConnectionParameters) -> None:
+        self.mq_params = conn_params
         self.should_reconnect: bool = False
         self.was_consuming = False
 
@@ -42,6 +70,8 @@ class RabbitMQ:
         self._exchange: str = None
         self._queue: str = None
         self._routing_key: str = None
+        self._mp_data_queue: Queue = None
+        self._mp_end_event: Event = None
 
     def prepare(self, exchange: str, queue: str, routing_key: str) -> None:
         """
@@ -67,6 +97,29 @@ class RabbitMQ:
 
         :rtype: pika.SelectConnection
         """
+        _logger.info("Connecting to MQ")
+        self._s3_client = s3_client
+        self._queue = queue
+        self._connection = pika.SelectConnection(
+            parameters=self.mq_params,
+            on_open_callback=self.on_connection_open,
+            on_open_error_callback=self.on_connection_open_error,
+            on_close_callback=self.on_connection_closed,
+        )
+        self._connection.ioloop.start()
+
+    def consume_v2(
+        self, queue: str, s3_client: S3Events, mp_data_queue: Queue, mp_end_event: Event
+    ) -> None:
+        """
+        This method connects to RabbitMQ, returning the connection handle.
+        When the connection is established, the on_connection_open method
+        will be invoked by pika.
+
+        :rtype: pika.SelectConnection
+        """
+        self._mp_end_event = mp_end_event
+        self._mp_data_queue = mp_data_queue
         _logger.info("Connecting to MQ")
         self._s3_client = s3_client
         self._queue = queue
@@ -355,14 +408,47 @@ class RabbitMQ:
                 bucket,
                 event,
                 obj_key,
-                obj_key,
+                obj_size,
             )
             action = self.__bucket_event(event=event)
             if action == "download":
-                self._s3_client.download_object(bucket=bucket, path=obj_key)
+                key = check_object(obj_key)
+                if isinstance(key, dict):
+                    self._download_remapped(bucket=bucket, data=key)
+                else:
+                    _ = self._s3_client.download_object_v2(
+                        bucket=bucket, s3_obj=key, local_path=key
+                    )
+
             if action == "remove":
                 self._s3_client.remove_object(bucket=bucket, path=obj_key)
         self.acknowledge_message(basic_deliver.delivery_tag)
+
+    def _download_remapped(self, bucket: str, data: dict) -> None:
+        """
+        Method to download and remap object
+
+        :param str bucket: Bucket name
+        :param dict data: Dictionary containing remapping info
+        :rtype: None
+        """
+        s3_obj, local_path, message = remmaping_message(
+            action="download", remap=data, bucket=bucket
+        )
+        dl_status = self._s3_client.download_object_v2(
+            bucket=bucket, s3_obj=s3_obj, local_path=local_path
+        )
+        if dl_status:
+            self._mp_data_queue.put_nowait(message)
+
+    def _download(self, bucket: str, s3_obj: str) -> None:
+        """
+        Method to download s3 object
+
+        :param str bucket: Bucket name
+        :param str s3_obj: S3 object key
+        :rtype: None
+        """
 
     def __bucket_event(self, event: str) -> str:
         """

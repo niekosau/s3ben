@@ -1,25 +1,23 @@
 import hashlib
-import json
 import multiprocessing
 import os
 import shutil
-import signal
 import time
 from datetime import datetime, timedelta
 from logging import getLogger
-from multiprocessing import Event, Queue
 from queue import Empty
-from typing import Union
 
 from tabulate import tabulate
 
 from s3ben.helpers import (
     ProgressBar,
+    check_object,
     convert_to_human,
     convert_to_human_v2,
     drop_privileges,
 )
 from s3ben.rabbit import RabbitMQ
+from s3ben.remapper import ResolveRemmaping
 from s3ben.s3 import S3Events
 from s3ben.ui import S3benGui
 
@@ -59,18 +57,27 @@ class BackupManager:
         self._end_event = None
         self._barrier = None
         self._curses = curses
-        signal.signal(signal.SIGTERM, self.__exit)
-        signal.signal(signal.SIGINT, self.__exit)
 
-    def __exit(self, signal_no, stack_frame) -> None:
-        raise SystemExit()
-
-    def start_consumer(self, s3_client: S3Events) -> None:
+    def start_consumer(
+        self,
+        s3_client: S3Events,
+        mp_data_queue: multiprocessing.Queue,
+        mp_end_event: multiprocessing.Event,
+    ) -> None:
+        """
+        Method to run rabbit mq consume
+        """
         _logger.debug("Dropping privileges to %s", self._user)
         drop_privileges(user=self._user)
         try:
-            self._mq.consume(queue=self._mq_queue, s3_client=s3_client)
+            self._mq.consume_v2(
+                queue=self._mq_queue,
+                s3_client=s3_client,
+                mp_data_queue=mp_data_queue,
+                mp_end_event=mp_end_event,
+            )
         except KeyboardInterrupt:
+            _logger.debug("Stopping mq")
             self._mq.stop()
         except SystemExit:
             self._mq.stop()
@@ -179,17 +186,6 @@ class BackupManager:
         _logger.debug("Finished reading pages")
         self._end_event.set()
 
-    def __check_object(self, path) -> Union[str, dict]:
-        """
-        Check object path for forward slash and replace
-        if found as first character
-        :param str path: Object path from s3
-        """
-        if path[0] == "/":
-            _logger.error("Forward slash found as first simbol: %s", path)
-            return {path[1:]: "_forward_slash_" + path}
-        return path
-
     def _page_verfication(self, skip_checksum: bool, skip_filesize: bool) -> None:
         """
         Method to verify file by comparing size and checksum
@@ -208,7 +204,7 @@ class BackupManager:
             download_list = []
             for obj in data:
                 obj_key = obj.get("Key")
-                key = self.__check_object(obj_key)
+                key = check_object(obj_key)
                 if isinstance(key, dict):
                     remapping_update = {"action": "update"}
                     local_path = next(iter(key.values()))
@@ -390,67 +386,3 @@ class BackupManager:
             _logger.debug("Removing %s", to_remove)
             shutil.rmtree(path=to_remove)
         _logger.debug("Cleanup done")
-
-
-class ResolveRemmaping:
-    """
-    Class to resolve remmapped objects
-    :param str backup_root: Path to backup root
-    """
-
-    def __init__(self, backup_root: str):
-        self._queue = None
-        self._remapping_db = os.path.join(backup_root, ".remappings")
-
-    def update_remapping(self, bucket: str, remap: dict) -> None:
-        """
-        Method to update remapping database
-        :param str bucket: bucket name for which remap should be added
-        :peram dict remap: dictionary containing remapping information
-        :return: None
-        """
-        b_remaps = {}
-        if not os.path.exists(self._remapping_db):
-            _logger.warning("Remapping db doesn't exists, creating")
-            update = {bucket: remap}
-            with open(file=self._remapping_db, mode="w", encoding="utf-8") as f:
-                json.dump(update, f)
-                return
-        with open(file=self._remapping_db, mode="r", encoding="utf-8") as f:
-            remappings: dict = json.load(f)
-        if bucket in remappings.keys():
-            b_remaps = remappings.pop(bucket)
-        b_remaps.update(remap)
-        remappings.update({bucket: b_remaps})
-        with open(file=self._remapping_db, mode="w", encoding="utf-8") as f:
-            json.dump(obj=remappings, fp=f)
-
-    def run(self, queue: Queue, event: Event) -> None:
-        """
-        Method to launch Resolver as a process
-        :param multiprocess.Queue queue: multiprocess.Queue class for receiving data
-        :param multiprocess.Event event: multiprocess.Event class for receiving end event
-        :return: None
-
-        for updating remap db, dictionary must be added to queue:
-        {
-          "action": "update",
-          "data": {
-            "bucket": "bucket_name"
-            "remap": {
-              "object_key_to_match_local_file": "relative/path_to_key"
-            }
-          }
-        }
-        """
-        _logger.info("starting remapping resolver")
-        while not event.is_set():
-            try:
-                data: dict = queue.get(timeout=1)
-            except Empty:
-                if event.is_set():
-                    break
-                continue
-            if data.get("action") == "update":
-                remap = data.get("data")
-                self.update_remapping(**remap)

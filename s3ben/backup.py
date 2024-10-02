@@ -70,7 +70,7 @@ class BackupManager:
         _logger.debug("Dropping privileges to %s", self._user)
         drop_privileges(user=self._user)
         try:
-            self._mq.consume_v2(
+            self._mq.consume(
                 queue=self._mq_queue,
                 s3_client=s3_client,
                 mp_data_queue=mp_data_queue,

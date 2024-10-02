@@ -1,10 +1,12 @@
 import functools
 import json
+import multiprocessing
 from dataclasses import dataclass, field
 from logging import getLogger
-from multiprocessing import Event, Queue
+from multiprocessing.synchronize import Event as EventClass
 
 import pika
+from typing_extensions import TypeAlias
 
 from s3ben.helpers import check_object, remmaping_message
 from s3ben.s3 import S3Events
@@ -55,7 +57,11 @@ class RabbitMQ:
     :param str virtualhost: virtual host to connect, default: /
     """
 
-    def __init__(self, conn_params: pika.ConnectionParameters) -> None:
+    Queue: TypeAlias = multiprocessing.Queue
+    Event: TypeAlias = EventClass
+    ConnectionParameters: TypeAlias = pika.ConnectionParameters
+
+    def __init__(self, conn_params: ConnectionParameters) -> None:
         self.mq_params = conn_params
         self.should_reconnect: bool = False
         self.was_consuming = False
@@ -89,26 +95,7 @@ class RabbitMQ:
         self.close_channel()
         connection.close()
 
-    def consume(self, queue: str, s3_client: S3Events) -> None:
-        """
-        This method connects to RabbitMQ, returning the connection handle.
-        When the connection is established, the on_connection_open method
-        will be invoked by pika.
-
-        :rtype: pika.SelectConnection
-        """
-        _logger.info("Connecting to MQ")
-        self._s3_client = s3_client
-        self._queue = queue
-        self._connection = pika.SelectConnection(
-            parameters=self.mq_params,
-            on_open_callback=self.on_connection_open,
-            on_open_error_callback=self.on_connection_open_error,
-            on_close_callback=self.on_connection_closed,
-        )
-        self._connection.ioloop.start()
-
-    def consume_v2(
+    def consume(
         self, queue: str, s3_client: S3Events, mp_data_queue: Queue, mp_end_event: Event
     ) -> None:
         """

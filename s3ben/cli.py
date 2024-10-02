@@ -84,11 +84,10 @@ def run_consumer(end_event: Event, data_queue: Queue, config: dict) -> None:
         config=s3_config,
         backup_root=backup_root,
     )
-    mq = RabbitMQ(conn_params=mq_connection.conn_params)
     backup = BackupManager(
         backup_root=backup_root,
         user=main_section.pop("user"),
-        mq=mq,
+        mq_conn=mq_connection,
         mq_queue=mq_ex_queue.queue,
     )
     backup.start_consumer(
@@ -138,7 +137,7 @@ def setup(config: dict, *_) -> None:
         exchange=mq_section.pop("exchange"), queue=mq_section.pop("queue")
     )
     mq_connection = MqConnection(**mq_section)
-    mq = RabbitMQ(conn_params=mq_connection.conn_params)
+    mq = RabbitMQ(conn_params=mq_connection)
     mq.prepare(
         exchange=mq_ex_queue.exchange,
         queue=mq_ex_queue.queue,

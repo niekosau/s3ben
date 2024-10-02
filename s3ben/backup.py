@@ -1,3 +1,7 @@
+"""
+Backup manager module
+"""
+
 import hashlib
 import multiprocessing
 import os
@@ -5,9 +9,12 @@ import shutil
 import time
 from datetime import datetime, timedelta
 from logging import getLogger
+from multiprocessing.synchronize import Event as EventClass
 from queue import Empty
+from typing import Optional, Union
 
-from tabulate import tabulate
+from tabulate import tabulate  # type: ignore
+from typing_extensions import TypeAlias
 
 from s3ben.helpers import (
     ProgressBar,
@@ -16,12 +23,14 @@ from s3ben.helpers import (
     convert_to_human_v2,
     drop_privileges,
 )
-from s3ben.rabbit import RabbitMQ
+from s3ben.rabbit import MqConnection, RabbitMQ
 from s3ben.remapper import ResolveRemmaping
 from s3ben.s3 import S3Events
 from s3ben.ui import S3benGui
 
 _logger = getLogger(__name__)
+Queue: TypeAlias = multiprocessing.Queue
+Event: TypeAlias = EventClass
 
 
 class BackupManager:
@@ -38,18 +47,19 @@ class BackupManager:
         self,
         backup_root: str,
         user: str,
-        mq_queue: str = None,
-        mq: RabbitMQ = None,
-        s3_client: S3Events = None,
+        mq_queue: Optional[str] = None,
+        mq_conn: Optional[MqConnection] = None,
+        s3_client: Optional[S3Events] = None,
         curses: bool = False,
     ):
         self._backup_root = backup_root
         self._user = user
-        self._mq = mq
+        self._mq: Union[RabbitMQ, None] = None
+        self._mq_conn = mq_conn
         self._mq_queue = mq_queue
         self._s3_client = s3_client
-        self._bucket_name: str = None
-        self._page_size: int = None
+        self._bucket_name: Union[str, None] = None
+        self._page_size: Union[int, None] = None
         self._progress_queue = None
         self._download_queue = None
         self._verify_queue = None
@@ -57,30 +67,69 @@ class BackupManager:
         self._end_event = None
         self._barrier = None
         self._curses = curses
+        self._delay = 0
+        self._mp_data_queue: Union[Queue, None] = None
+        self._mp_end_event: Union[Event, None] = None
 
     def start_consumer(
         self,
         s3_client: S3Events,
-        mp_data_queue: multiprocessing.Queue,
-        mp_end_event: multiprocessing.Event,
+        mp_data_queue: Queue,
+        mp_end_event: Event,
     ) -> None:
         """
         Method to run rabbit mq consume
         """
+        self._mp_data_queue = mp_data_queue
+        self._mp_end_event = mp_end_event
+        self._s3_client = s3_client
         _logger.debug("Dropping privileges to %s", self._user)
         drop_privileges(user=self._user)
-        try:
-            self._mq.consume(
-                queue=self._mq_queue,
-                s3_client=s3_client,
-                mp_data_queue=mp_data_queue,
-                mp_end_event=mp_end_event,
-            )
-        except KeyboardInterrupt:
-            _logger.debug("Stopping mq")
+        self.__run_consumer()
+
+    def __run_consumer(self) -> None:
+        """
+        Method to run mq consumer
+        """
+        self._mq = RabbitMQ(conn_params=self._mq_conn)
+        while True:
+            try:
+                self._mq.consume(
+                    queue=self._mq_queue,
+                    s3_client=self._s3_client,
+                    mp_data_queue=self._mp_data_queue,
+                    mp_end_event=self._mp_end_event,
+                )
+            except (KeyboardInterrupt, SystemExit):
+                _logger.debug("Stopping mq")
+                self._mq.stop()
+                break
+            self.__reconnect_consumer()
+
+    def __reconnect_consumer(self) -> None:
+        """
+        Method to reconnect consumer
+        """
+        if self._mq.should_reconnect:
             self._mq.stop()
-        except SystemExit:
-            self._mq.stop()
+            r_delay = self.__reconnect_delay()
+            _logger.warning("Connection lost, reconnecting after %s seconds", r_delay)
+            time.sleep(r_delay)
+            self._mq = RabbitMQ(conn_params=self._mq_conn)
+
+    def __reconnect_delay(self) -> int:
+        """
+        Method to manage reconnect delay,
+        current max delay 5s
+        :rtype: int
+        :return: Number of seconds to sleep
+        """
+        max_delay = 5
+        if self._mq.was_consuming:
+            self._delay = 0
+        else:
+            self._delay += 1
+        return min(max_delay, self._delay)
 
     def _progress(self) -> None:
         progress = ProgressBar()

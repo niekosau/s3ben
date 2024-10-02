@@ -1,15 +1,25 @@
+"""
+Rabbitmq related module
+"""
+
 import functools
 import json
+import multiprocessing
 from dataclasses import dataclass, field
 from logging import getLogger
-from multiprocessing import Event, Queue
+from multiprocessing.synchronize import Event as EventClass
+from typing import Optional
 
 import pika
+from typing_extensions import TypeAlias
 
 from s3ben.helpers import check_object, remmaping_message
 from s3ben.s3 import S3Events
 
 _logger = getLogger(__name__)
+Queue: TypeAlias = multiprocessing.Queue
+Event: TypeAlias = EventClass
+ConnectionParameters: TypeAlias = pika.ConnectionParameters
 
 
 @dataclass
@@ -23,16 +33,6 @@ class MqConnection:
     password: str = field(repr=False)
     port: int
     virtualhost: str
-    conn_params: pika.ConnectionParameters = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        logins = pika.credentials.PlainCredentials(self.user, self.password)
-        self.conn_params = pika.ConnectionParameters(
-            host=self.host,
-            port=self.port,
-            virtual_host=self.virtualhost,
-            credentials=logins,
-        )
 
 
 @dataclass
@@ -55,7 +55,7 @@ class RabbitMQ:
     :param str virtualhost: virtual host to connect, default: /
     """
 
-    def __init__(self, conn_params: pika.ConnectionParameters) -> None:
+    def __init__(self, conn_params: MqConnection) -> None:
         self.mq_params = conn_params
         self.should_reconnect: bool = False
         self.was_consuming = False
@@ -66,12 +66,12 @@ class RabbitMQ:
         self._closing: bool = False
         self._consumer_tag = None
         self._prefetch_count = 1
-        self._s3_client: S3Events = None
-        self._exchange: str = None
-        self._queue: str = None
-        self._routing_key: str = None
-        self._mp_data_queue: Queue = None
-        self._mp_end_event: Event = None
+        self._s3_client: Optional[S3Events] = None
+        self._exchange: Optional[str] = None
+        self._queue: Optional[str] = None
+        self._routing_key: Optional[str] = None
+        self._mp_data_queue: Optional[Queue] = None
+        self._mp_end_event: Optional[Event] = None
 
     def prepare(self, exchange: str, queue: str, routing_key: str) -> None:
         """
@@ -81,7 +81,8 @@ class RabbitMQ:
         :param str routing_key: bind queu to exchange ussing routing key
         """
         _logger.info("Preparing rabbitmq cluster for work")
-        connection = pika.BlockingConnection(parameters=self.mq_params)
+        conn_params = self.__conn_params()
+        connection = pika.BlockingConnection(parameters=conn_params)
         self._channel = connection.channel()
         self.setup_exchange(exchange=exchange)
         self.setup_queue(queue=queue)
@@ -89,26 +90,30 @@ class RabbitMQ:
         self.close_channel()
         connection.close()
 
-    def consume(self, queue: str, s3_client: S3Events) -> None:
+    def __conn_params(self) -> ConnectionParameters:
         """
-        This method connects to RabbitMQ, returning the connection handle.
-        When the connection is established, the on_connection_open method
-        will be invoked by pika.
+        Method to construct and return pika connection parameters
+        """
+        logins = pika.credentials.PlainCredentials(
+            self.mq_params.user, self.mq_params.password
+        )
+        return pika.ConnectionParameters(
+            host=self.mq_params.host,
+            port=self.mq_params.port,
+            virtual_host=self.mq_params.virtualhost,
+            credentials=logins,
+        )
 
-        :rtype: pika.SelectConnection
-        """
-        _logger.info("Connecting to MQ")
-        self._s3_client = s3_client
-        self._queue = queue
-        self._connection = pika.SelectConnection(
-            parameters=self.mq_params,
+    def __connect(self):
+        conn_params = self.__conn_params()
+        return pika.SelectConnection(
+            parameters=conn_params,
             on_open_callback=self.on_connection_open,
             on_open_error_callback=self.on_connection_open_error,
             on_close_callback=self.on_connection_closed,
         )
-        self._connection.ioloop.start()
 
-    def consume_v2(
+    def consume(
         self, queue: str, s3_client: S3Events, mp_data_queue: Queue, mp_end_event: Event
     ) -> None:
         """
@@ -120,16 +125,10 @@ class RabbitMQ:
         """
         self._mp_end_event = mp_end_event
         self._mp_data_queue = mp_data_queue
-        _logger.info("Connecting to MQ")
         self._s3_client = s3_client
         self._queue = queue
-        self._connection = pika.SelectConnection(
-            parameters=self.mq_params,
-            on_open_callback=self.on_connection_open,
-            on_open_error_callback=self.on_connection_open_error,
-            on_close_callback=self.on_connection_closed,
-        )
-        self._connection.ioloop.start()
+        self._connection = self.__connect()
+        self._connection = self._connection.ioloop.start()
 
     def on_connection_open(self, _unused_connection) -> None:
         """This method is called by pika once the connection to RabbitMQ has
@@ -384,7 +383,13 @@ class RabbitMQ:
         if self._channel:
             self._channel.close()
 
-    def on_message(self, _unused_channel, basic_deliver, properties, body) -> None:
+    def on_message(
+        self,
+        _unused_channel,
+        basic_deliver,
+        properties,
+        body,
+    ) -> None:
         """
         Invoked by pika when a message is delivered from RabbitMQ. The
         channel is passed for your convenience. The basic_deliver object that
@@ -419,7 +424,7 @@ class RabbitMQ:
                 if isinstance(key, dict):
                     self._download_remapped(bucket=bucket, data=key)
                 else:
-                    _ = self._s3_client.download_object_v2(
+                    _ = self._s3_client.download_object_v2(  # type: ignore[union-attr]
                         bucket=bucket, s3_obj=key, local_path=key
                     )
 
@@ -427,7 +432,9 @@ class RabbitMQ:
                 if isinstance(key, dict):
                     self._remove_remapped(bucket=bucket, data=key)
                 else:
-                    self._s3_client.remove_object(bucket=bucket, path=obj_key)
+                    self._s3_client.remove_object(  # type: ignore[union-attr]
+                        bucket=bucket, path=obj_key
+                    )
         self.acknowledge_message(basic_deliver.delivery_tag)
 
     def _remove_remapped(self, bucket, data: dict) -> None:
@@ -441,8 +448,8 @@ class RabbitMQ:
         _, local_path, message = remmaping_message(
             action="remove", remap=data, bucket=bucket
         )
-        self._s3_client.remove_object(bucket=bucket, path=local_path)
-        self._mp_data_queue.put_nowait(message)
+        self._s3_client.remove_object(bucket=bucket, path=local_path)  # type: ignore[union-attr]
+        self._mp_data_queue.put_nowait(message)  # type: ignore[union-attr]
 
     def _download_remapped(self, bucket: str, data: dict) -> None:
         """
@@ -455,11 +462,11 @@ class RabbitMQ:
         s3_obj, local_path, message = remmaping_message(
             action="download", remap=data, bucket=bucket
         )
-        dl_status = self._s3_client.download_object_v2(
+        dl_status = self._s3_client.download_object_v2(  # type: ignore[union-attr]
             bucket=bucket, s3_obj=s3_obj, local_path=local_path
         )
         if dl_status:
-            self._mp_data_queue.put_nowait(message)
+            self._mp_data_queue.put_nowait(message)  # type: ignore[union-attr]
 
     def __bucket_event(self, event: str) -> str:
         """

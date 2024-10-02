@@ -87,6 +87,23 @@ class ResolveRemmaping:
         with open(file=self._remappings_deleted, mode="w", encoding="utf-8") as f:
             json.dump(moved_remappings, f)
 
+    def delete_remapping(self, key: str) -> None:
+        """
+        Method to remove moved remapping from deleted items
+
+        :param str key: Key to remove from deleted remapping db
+        """
+        if not os.path.exists(self._remappings_deleted):
+            _logger.warning("Deleted remapping doesn't exists")
+            return
+        with open(file=self._remappings_deleted, mode="r", encoding="utf-8") as f:
+            remappings = json.load(f)
+        if key in remappings.keys():
+            _logger.info("removing %s key from deleted remappings", key)
+            remappings.pop(key)
+            with open(file=self._remappings_deleted, mode="w", encoding="utf-8") as f:
+                json.dump(remappings, f)
+
     def run(self, queue: Queue, event: Event) -> None:
         """
         Method to launch Resolver as a process

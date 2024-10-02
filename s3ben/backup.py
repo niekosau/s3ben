@@ -375,14 +375,16 @@ class BackupManager:
         :param int days: Days to keep deleted items
         :return: None
         """
+        cleanup_remap = ResolveRemmaping(backup_root=self._backup_root)
         deleted_path = os.path.join(self._backup_root, "deleted")
         date_to_remove = datetime.now() - timedelta(days=days)
         _, dirs, _ = next(os.walk(deleted_path))
-        for dir in dirs:
-            dir_date = datetime.strptime(dir, "%Y-%m-%d")
+        for d in dirs:
+            dir_date = datetime.strptime(d, "%Y-%m-%d")
             if dir_date > date_to_remove:
                 continue
-            to_remove = os.path.join(deleted_path, dir)
-            _logger.debug("Removing %s", to_remove)
+            cleanup_remap.delete_remapping(key=d)
+            to_remove = os.path.join(deleted_path, d)
+            _logger.info("Removing %s", to_remove)
             shutil.rmtree(path=to_remove)
         _logger.debug("Cleanup done")

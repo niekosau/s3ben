@@ -9,6 +9,9 @@ import pwd
 import signal
 from argparse import Namespace
 from logging import getLogger
+from multiprocessing.synchronize import Event as EventClass
+
+from typing_extensions import TypeAlias
 
 from s3ben.arguments import base_args
 from s3ben.backup import BackupManager
@@ -23,6 +26,8 @@ from s3ben.sentry import init_sentry
 _logger = getLogger(__name__)
 args = base_args()
 subparser = args.add_subparsers(dest="subcommand")
+Queue: TypeAlias = multiprocessing.Queue
+Event: TypeAlias = EventClass
 
 
 def main() -> None:
@@ -44,8 +49,8 @@ def main() -> None:
 
 
 def run_remmaper(
-    data_queue: multiprocessing.Queue,
-    end_event: multiprocessing.Event,
+    data_queue: Queue,
+    end_event: Event,
     backup_root: str,
 ) -> None:
     """
@@ -60,9 +65,7 @@ def run_remmaper(
     remap_resolver.run(queue=data_queue, event=end_event)
 
 
-def run_consumer(
-    end_event: multiprocessing.Event, data_queue: multiprocessing.Queue, config: dict
-) -> None:
+def run_consumer(end_event: Event, data_queue: Queue, config: dict) -> None:
     """
     Function to start consumers
     """
@@ -261,7 +264,12 @@ def buckets(config: dict, parsed_args: Namespace) -> None:
             help="How long to keep, default: %(default)d",
             default=30,
             type=int,
-        )
+        ),
+        argument(
+            "--force",
+            action="store_true",
+            help="Force removing all deleted objects",
+        ),
     ],
     parent=subparser,  # type: ignore
 )
@@ -276,7 +284,14 @@ def cleanup(config: dict, parsed_args: Namespace) -> None:
         backup_root=backup_root,
         user=config["s3ben"].pop("user"),
     )
-    backup.cleanup_deleted_items(days=parsed_args.days_keep)
+    if parsed_args.days_keep == 0:
+        if not parsed_args.force:
+            _logger.error(
+                "This will remove all moved objects, use --force if you want to do this anyway"
+            )
+            return
+        _logger.warning("Removing ALL deleted items")
+    backup.cleanup_deleted_items(days=parsed_args.days_keep + 1)
 
 
 @command(

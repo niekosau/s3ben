@@ -96,6 +96,20 @@ def run_consumer(end_event: Event, data_queue: Queue, config: dict) -> None:
     )
 
 
+def exclude_list(config: dict) -> list:
+    """
+    Function to return exclude list from config
+
+    :param dict config: Configuration dictionary from parseconfig
+    :rtype: list
+    :return: List of excluded buckets
+    """
+    if "exclude" not in config["s3"].keys():
+        return []
+    exclude = config["s3"].pop("exclude").replace('"', "").replace("'", "").split(",")
+    return [b.strip() for b in exclude]
+
+
 def signal_handler(signal_no, stack_frame) -> None:
     """
     Function to hanle signlas
@@ -131,9 +145,8 @@ def setup(config: dict, *_) -> None:
         routing_key=mq_ex_queue.exchange,
     )
     _logger.info("Setting up S3")
+    exclude_buckets = exclude_list(config=config)
     s3 = config.pop("s3")
-    exclude_buckets = s3.pop("exclude").split(",")
-    exclude_buckets = [b.strip() for b in exclude_buckets]
     s3_config = S3Config(**s3)
     s3_events = S3Events(config=s3_config)
     all_buckets = s3_events.get_admin_buckets()
@@ -233,9 +246,8 @@ def buckets(config: dict, parsed_args: Namespace) -> None:
     Cli command: buckets
     """
     _logger.debug("Listing buckets")
+    exclude = exclude_list(config=config)
     s3 = config.pop("s3")
-    exclude = s3.pop("exclude").replace('"', "").replace("'", "").split(",")
-    exclude = [e.strip() for e in exclude]
     s3_config = S3Config(**s3)
     backup_root = config["s3ben"].pop("backup_root")
     s3_events = S3Events(
@@ -305,12 +317,13 @@ def cleanup(config: dict, parsed_args: Namespace) -> None:
     ],
     parent=subparser,  # type: ignore
 )
-def consume_v2(config: dict, parsed_args: Namespace) -> None:
+def consume(config: dict, parsed_args: Namespace) -> None:
     """
     Function to start/restart consumers and other needed processes
 
     :param str backup_root: Backup root
-    :param int n_proc: number of consumer processes to start, default 4
+    :param int n_proc: number of consumer processes to start,
+        default 4 or max numbers of cpu cores
     :return: None
     """
     signal.signal(signal.SIGTERM, signal_handler)

@@ -65,7 +65,7 @@ def check_object(path) -> Union[str, dict]:
     """
     if path[0] == "/":
         remmpaed_obj = "_forward_slash_" + path
-        _logger.error(
+        _logger.warning(
             "Forward slash found for object: %s, remmaping to: %s", path, remmpaed_obj
         )
         return {path[1:]: remmpaed_obj}

@@ -4,8 +4,9 @@ import multiprocessing
 import os
 import shutil
 import sys
+from dataclasses import dataclass, field
 from logging import getLogger
-from typing import Union
+from typing import Optional, Union
 
 import boto3
 import botocore
@@ -18,6 +19,18 @@ from s3ben.constants import AMQP_HOST, NOTIFICATION_EVENTS, TOPIC_ARN
 _logger = getLogger(__name__)
 
 
+@dataclass
+class S3Config:
+    """
+    Dataclas for s3 configuration
+    """
+
+    hostname: str
+    access_key: str = field(repr=False)
+    secret_key: str = field(repr=False)
+    secure: bool
+
+
 class S3Events:
     """
     Class for configuring or showing config of the bucket
@@ -28,42 +41,45 @@ class S3Events:
 
     def __init__(
         self,
-        secret_key: str,
-        access_key: str,
-        hostname: str,
-        secure: bool,
-        backup_root: str = None,
+        config: S3Config,
+        backup_root: Optional[str] = None,
     ) -> None:
         self._download = os.path.join(backup_root, "active") if backup_root else None
         self._remove = os.path.join(backup_root, "deleted") if backup_root else None
-        protocol = "https" if secure else "http"
-        endpoint = f"{protocol}://{hostname}"
+        protocol = "https" if config.secure else "http"
+        endpoint = f"{protocol}://{config.hostname}"
         self.client_s3 = boto3.client(
             service_name="s3",
             region_name="default",
             endpoint_url=endpoint,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
+            aws_access_key_id=config.access_key,
+            aws_secret_access_key=config.secret_key,
         )
         self.client_sns = boto3.client(
             service_name="sns",
             region_name="default",
             endpoint_url=endpoint,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
+            aws_access_key_id=config.access_key,
+            aws_secret_access_key=config.secret_key,
             config=botocore.client.Config(signature_version="s3"),
         )
         self.client_admin = RGWAdmin(
-            access_key=access_key, secret_key=secret_key, server=hostname, secure=secure
+            access_key=config.access_key,
+            secret_key=config.secret_key,
+            server=config.hostname,
+            secure=config.secure,
         )
-        self.session = boto3.Session(
+        session = boto3.Session(
             region_name="default",
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
+            aws_access_key_id=config.access_key,
+            aws_secret_access_key=config.secret_key,
         )
-        self.resouce = self.session.resource(service_name="s3", endpoint_url=endpoint)
+        self.resouce = session.resource(service_name="s3", endpoint_url=endpoint)
 
     def get_config(self, bucket: str):
+        """
+        Method to get bucket notification config
+        """
         return self.client_s3.get_bucket_notification_configuration(Bucket=bucket)
 
     def create_bucket(self, bucket: str) -> None:
@@ -76,12 +92,8 @@ class S3Events:
 
     def create_topic(
         self,
-        mq_host: str,
-        mq_user: str,
-        mq_password: str,
+        config,
         exchange: str,
-        mq_port: int,
-        mq_virtualhost: str,
     ) -> None:
         """
         Create bucket event notification config
@@ -89,11 +101,11 @@ class S3Events:
         :param str amqp: rabbitmq address
         """
         amqp = AMQP_HOST.format(
-            user=mq_user,
-            password=mq_password,
-            host=mq_host,
-            port=mq_port,
-            virtualhost=mq_virtualhost,
+            user=config.user,
+            password=config.password,
+            host=config.host,
+            port=config.port,
+            virtualhost=config.virtualhost,
         )
         attributes = {
             "push-endpoint": amqp,
@@ -141,8 +153,8 @@ class S3Events:
             _logger.warning("Bucket %s not found", bucket)
             sys.exit()
 
-    def __decuple_download(self, input: tuple) -> None:
-        bucket, path = input
+    def __decuple_download(self, data: tuple) -> None:
+        bucket, path = data
         self.download_object(bucket, path)
 
     def download_object(self, bucket: str, path: Union[str, dict]):
@@ -171,6 +183,30 @@ class S3Events:
                 return
         _logger.info("Downloading: %s:%s to %s", bucket, s3_obj, destination)
         self.client_s3.download_file(Bucket=bucket, Key=s3_obj, Filename=destination)
+
+    def download_object_v2(self, bucket: str, s3_obj: str, local_path: str) -> bool:
+        """
+        Method to download s3 objects and save to local file system
+
+        :param str bucket: Bucket name
+        :param str s3_obj: S3 object key to download
+        :param str local_path: relative path from backup_root where to save
+
+        :rtype: bool
+        """
+        try:
+            self.client_s3.head_object(Bucket=bucket, Key=s3_obj)
+        except botocore.exceptions.ClientError as err:
+            if err.response["ResponseMetadata"]["HTTPStatusCode"] == 404:
+                _logger.warning("%s:%s object not found", bucket, s3_obj)
+                return False
+        dst = os.path.join(self._download, bucket, local_path)
+        dst_dir = os.path.dirname(dst)
+        if not os.path.exists(dst_dir):
+            os.makedirs(dst_dir, exist_ok=True)
+        _logger.info("Downloading %s:%s", bucket, s3_obj)
+        self.client_s3.download_file(Bucket=bucket, Key=s3_obj, Filename=dst)
+        return True
 
     def remove_object(self, bucket: str, path: str) -> None:
         """
@@ -219,26 +255,3 @@ class S3Events:
         """
         objects = self.resouce.Bucket(bucket_name).objects.all()
         return [o.key for o in objects]
-
-    # def download_all_objects_v2(
-    #     self, baucket_name: str, step: int, page_queue: multiprocessing.Queue
-    # ) -> None:
-    #     """
-    #     Download objects from page object iterating every n'th page
-    #     :param str bucket_name: Name of the bucket
-    #     :param page: bot paginator
-    #     :param int step: For loop step for multiprocess support
-    #     :param multiprocessing.Queue queu: Multiprocess queu for exchanging information
-    #     """
-    #     import time
-    #
-    #     while True:
-    #         data = page_queue.get(block=True, timeout=10)
-    #         print(len(data[0]["Contents"]))
-    #         if page_queue.empty():
-    #             print("breaking")
-    #             break
-    #         time.sleep(0.5)
-
-    def _check_if_object_exists(self, path):
-        pass

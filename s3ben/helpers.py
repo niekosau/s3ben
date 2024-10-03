@@ -1,9 +1,12 @@
+"""
+Module for helping functions and classes
+"""
+
 import grp
-import math
 import os
 import pwd
-import sys
 import time
+from dataclasses import dataclass, field
 from logging import getLogger
 from typing import Tuple, Union
 
@@ -26,12 +29,12 @@ def drop_privileges(user: str) -> None:
         group.gr_gid for group in grp.getgrall() if new_user.pw_name in group.gr_mem
     ]
     os.setgroups(new_gids[: os.NGROUPS_MAX])
-    os.setgid(new_user[0])
+    os.setgid(new_user.pw_uid)
     os.setuid(new_user.pw_uid)
     os.environ["HOME"] = new_user.pw_dir
 
 
-def convert_to_human_v2(value: int):
+def convert_to_human_v2(value: Union[int, float]) -> str:
     """
     Convert size to human
     """
@@ -45,7 +48,10 @@ def convert_to_human_v2(value: int):
     return f"{value:3.2f}{unit}{suffix}"
 
 
-def convert_to_human(value: int) -> tuple:
+def convert_to_human(value: Union[int, float]) -> tuple:
+    """
+    Onother convert function, should be renamed or consolidated
+    """
     if float(value) <= 1000.0:
         return value, ""
     for unit in UNITS:
@@ -81,229 +87,340 @@ def remmaping_message(action: str, remap: dict, bucket: str) -> Tuple[str, str, 
     :param str bucket: Name of the bucket
     """
     remapping_update = {"action": action}
-    remapping_update.update({"data": {"bucket": bucket, "remap": remap}})
+    remapping_update.update({"data": {"bucket": bucket, "remap": remap}})  # type: ignore
     local_path = next(iter(remap.values()))
     object_path = "/" + next(iter(remap.keys()))
     return object_path, local_path, remapping_update
 
 
-class ProgressBar:
+@dataclass
+class ProgressMarkers:
     """
-    Progress bar class
+    Dataclass for progress markers
     """
 
-    _skipped: int = 0
-    _percents = "[{0:>6.2f}%]"
-    _time_left = "[LEFT: {0:0>2}:{1:0>2}:{2:0>2}]"
-    _running = "[RUN: {0:0>2}:{1:0>2}:{2:0>2}]"
-    _progress = "[{:{done_marker}>{done_size}}{}{:{base_marker}>{left_size}}]"
-    _completed: float = 0
-    _download: float = 0
-    current_marker: list = ["-", "\\", "|", "/"]
-    filler_marker: str = "."
-    bar_length: int = 0
-    bar_size: int = 0
-    _preffix: str = ""
-    _suffix: str = ""
-    _done_marker: str = "█"
-    _total: float = 100.00
+    current: list = field(default_factory=lambda: ["-", "\\", "|", "/"])
+    done: str = field(default="█")
+    filler: str = field(default=".")
 
-    def __init__(
-        self,
-    ):
-        self.terminal_size: int = os.get_terminal_size().columns
-        self.percents: str = self._percents.format(0)
-        self.show_numbers: bool = False
-        self.time_start = int(time.perf_counter())
-        self.time_left = self._time_left.format(99, 59, 59)
-        self.run_time = self._running.format(0, 0, 0)
-        self._run_time = int(time.perf_counter())
-        self.avg_speed = 0
+    def current_marker(self) -> str:
+        """
+        Metod to get and rotate current marker
+        """
+        current_marker = self.current.pop(0)
+        self.current.append(current_marker)
+        return current_marker
 
-    def __update_stats(self) -> None:
-        self.__run_time()
-        self.__update_avg_speed()
-        self.__update_percent_done()
-        self.__calculate_estimate()
-        self.__update_run_time()
-        self.__update_terminal_size()
 
-    def __get_current_marker(self) -> str:
-        marker = self.current_marker.pop(0)
-        self.current_marker.append(marker)
-        return self.current_marker[-1]
+class ProgressSpeed:
+    """
+    Class to calculate avg and estimate time
+    """
 
-    def __run_time(self) -> None:
-        self._run_time = int(time.perf_counter()) - self.time_start
+    def __init__(self) -> None:
+        self.__speed_history = [0.0 for _ in range(5)]
+        self.__next_update: int = int(time.perf_counter()) + 1
+        self.__current_update: int = 0
+        self._speed: float = 0
 
-    def __update_terminal_size(self) -> None:
-        self.terminal_size = os.get_terminal_size().columns
+    @property
+    def speed(self) -> float:
+        """
+        Property to return current speed
+        :rtype: int
+        """
+        return self._speed
 
-    def __split_time(self, seconds: int) -> tuple:
-        hours = math.floor(seconds / 3600)
-        minutes = math.floor(seconds / 60) - (hours * 60)
-        seconds = math.floor(seconds - ((hours * 3600) + (minutes * 60)))
+    @speed.setter
+    def speed(self, value) -> None:
+        """
+        Method to set current speed
+        """
+        self.__current_update = int(time.perf_counter())
+        self._speed += value
+        if self.__current_update >= self.__next_update:
+            self.__speed_history.pop(0)
+            self.__speed_history.append(self._speed)
+            self._speed = 0
+            self.__next_update += 1
+
+    @property
+    def avg_speed(self) -> float:
+        """
+        Property to calculate avg speed
+        :rtype: float
+        """
+        return round(sum(self.__speed_history) / len(self.__speed_history), 2)
+
+
+class ProgressTimings:
+    """
+    Dataclass to calculate timings for progress
+    """
+
+    def __init__(self) -> None:
+        self._start: float = time.perf_counter()
+        self._current: float = time.perf_counter()
+        self._running: float = 0
+        self._next_update: int = int(time.perf_counter()) + 1
+
+    @property
+    def start(self) -> int:
+        """
+        Return start time
+        :rtype: int
+        """
+        return int(self._start)
+
+    @property
+    def running(self) -> tuple:
+        """
+        Method to calculate and return running time from start
+        :rtype: tuple
+        :return: (hours, minuts, seconds)
+        """
+
+        hours = int(self._running) // 3600
+        minutes = int(self._running) // 60 % 60
+        seconds = int(self._running) % 60
         return (hours, minutes, seconds)
 
-    def __update_run_time(self) -> None:
-        r_time = self.__split_time(self._run_time)
-        self.run_time = self._running.format(r_time[0], r_time[1], r_time[2])
-
-    def __update_avg_speed(self) -> None:
-        try:
-            self.avg_speed = self.progress / self._run_time
-        except ZeroDivisionError:
-            self.avg_speed = 0
-
-    def __calculate_estimate(self) -> None:
-        run_data_left = self.total - self.progress
-        try:
-            run_estimate = run_data_left // self.avg_speed
-            e_time = self.__split_time(run_estimate)
-            self.time_left = self._time_left.format(e_time[0], e_time[1], e_time[2])
-        except ZeroDivisionError:
-            self.time_left = self._time_left.format(99, 59, 59)
-
-    def __update_percent_done(self) -> None:
-        percents = float(self.progress * 100 / self.total)
-        self.percents = self._percents.format(percents)
-
-    def __format_skipped(self) -> str:
+    @property
+    def current(self) -> int:
         """
-        Format skipped progress bar
-
-        :return: String representing skipped files part
+        Property to return current running time
+        :rtype: int
         """
+        return int(self._current)
 
-        skipped, s_units = convert_to_human(self._skipped)
-        _skip_format_int = "[S:{0:>7}"
-        _skip_format_float = "[S:{0:>6.2f}{1:1}"
-
-        if self._skipped <= 1000:
-            return _skip_format_int.format(skipped)
-        return _skip_format_float.format(skipped, s_units)
-
-    def __format_downloaded(self) -> str:
+    @current.setter
+    def current(self, value: float) -> None:
         """
-        Method to format download files
-
-        :return: String representing download part of progress
+        Method to update current time and related variables
+        :param float value: time.perf_counter()
+        :rtype: None
         """
-
-        downloaded, d_units = convert_to_human(self._download)
-        _download_format_int = "|DL:{0:7}"
-        _download_format_float = "|DL:{0:6.2f}{1:1}"
-
-        if self._download <= 1000:
-            return _download_format_int.format(downloaded)
-        return _download_format_float.format(downloaded, d_units)
-
-    def __format_total(self) -> str:
-        """
-        Format total part for pregress bar
-        :returns: String
-        """
-        results = []
-        total, t_units = convert_to_human(self.total)
-        progress, units = convert_to_human(self.progress)
-        _progress_format_int = "|{0:>7}"
-        _progress_format_float = "|{0:>6.2f}{1:<1}"
-        _total_format_int = "/{0:<4}]"
-        _total_format_float = "/{0:<.2f}{1:<1}]"
-        if self.progress <= 1000:
-            results.append(_progress_format_int.format(progress))
-        else:
-            results.append(_progress_format_float.format(progress, units))
-        if self._total <= 1000:
-            results.append(_total_format_int.format(total))
-        else:
-            results.append(_total_format_float.format(total, t_units))
-        return "".join(results)
-
-    def __format_bar(self) -> str:
-        p_bar = [""]
-        bar_info = 0
-        bar_index = 0
-        finished = int(self.bar_size * self.progress / self.total)
-        skipped = self.__format_skipped()
-        download = self.__format_downloaded()
-        total = self.__format_total()
-        p_bar.append(skipped)
-        bar_info += len(skipped)
-        p_bar.append(download)
-        bar_info += len(download)
-        p_bar.append(total)
-        bar_info += len(total)
-        p_bar.append("")
-        bar_index = len(p_bar) - 1
-        p_bar.append(self.percents)
-        bar_info += len(self.percents)
-        p_bar.append(self.run_time)
-        bar_info += len(self.run_time)
-        p_bar.append(self.time_left)
-        bar_info += len(self.time_left)
-        if bar_index:
-            if self.terminal_size > bar_info:
-                self.bar_size = self.terminal_size - bar_info - 3
-                left_size = self.bar_size - finished
-                p_bar[bar_index] = self._progress.format(
-                    self._done_marker if finished > 1 else "",
-                    self.__get_current_marker() if left_size > 0 else "",
-                    self.filler_marker if left_size > 0 else "",
-                    done_marker=self._done_marker,
-                    done_size=finished if left_size > 0 else self.bar_size,
-                    in_progress_marker=self.filler_marker,
-                    base_marker=self.filler_marker,
-                    left_size=left_size if left_size > 0 else 0,
-                )
-            else:
-                p_bar.pop(bar_index)
-        if self.bar_size <= finished:
-            self.current_marker = ""
-        p_bar.append("\r")
-        line = "".join(p_bar)
-        return line
+        self._current = value
+        self._running = self._current - self._start
 
     @property
-    def progress(self) -> float:
-        return self._completed
+    def next_update(self) -> int:
+        """
+        Method to return next update number
+        :rtype: int
+        """
+        return int(self._next_update)
 
-    @progress.setter
-    def progress(self, data: dict) -> None:
+    @next_update.setter
+    def next_update(self, value) -> None:
         """
-        Update progress done percentage
+        Setter to update next_update value
         """
-        if "skipped" in data.keys():
-            skipped = data.get("skipped")
-            self._skipped += skipped
-            self._completed += skipped
-        if "downloaded" in data.keys():
-            download = data.get("downloaded")
-            self._download += download
-            self._completed += download
+        self._next_update += value
+
+
+class ProgressV2:
+    """
+    Dataclass to represent progress in console
+    """
+
+    def __init__(self, total: int) -> None:
+        self.times = ProgressTimings()
+        self.markers = ProgressMarkers()
+        self.speed = ProgressSpeed()
+        self._total = total
+        self._current: int = 0
+        self._download: int = 0
+        self.__progress: Union[str, None] = None
+        self.__download: Union[str, None] = None
+        self.__total: Union[str, None] = None
+        self.__running_time: Union[str, None] = None
+        self.__estimate_time: Union[str, None] = None
+        self.__avg_speed: Union[str, None] = None
+        self.__terminal_columns: int = 0
+        self.__percents_done: Union[str, None] = None
 
     @property
-    def total(self):
+    def total(self) -> int:
         """
-        Return total value of progress calculation
+        Property method for returning total value
+        :rtype: int
         """
         return self._total
 
-    @total.setter
-    def total(self, total) -> None:
+    @property
+    def current(self) -> int:
         """
-        Set progress bar total value
+        Property method to return current value
+        :rtype: int
         """
-        self._total = total
+        return self._current
 
-    def draw(self) -> None:
+    @property
+    def download(self) -> int:
         """
-        Draw a progress bar
+        Property method to return download value
         """
-        self.__update_stats()
-        sys.stdout.write(self.__format_bar())
-        sys.stdout.flush()
+        return self._download
+
+    # @current.setter
+    def update_bar(self, value: dict) -> None:
+        """
+        Method to update current progress value
+        """
+        dl = 0
+        vrf = 0
+        if "dl" in value.keys():
+            dl = value.pop("dl")
+            self._download += dl
+        else:
+            vrf = value.pop("vrf")
+        self._current += vrf + dl
+        self.times.current = int(time.perf_counter())
+        self.speed.speed = dl + vrf
+        if self.times.current >= self.times.next_update:
+            self.times.next_update = 1
+            self.__update_counters()
+            self.__print_line()
+
+    @property
+    def estimate_time_left(self) -> Tuple[int, int, int]:
+        """
+        Method to calculate remaining time
+        :rtype: tuple
+        :returns: (hours, minutes, seconds)
+        """
+        try:
+            left = int((self.total - self.current) / self.speed.avg_speed)
+            hours = left // 3600
+            minutes = left // 60 % 60
+            seconds = left % 60
+            return (hours, minutes, seconds)
+        except ZeroDivisionError:
+            return (99, 59, 59)
+
+    def __write_progress(self) -> None:
+        """
+        Method to create progress string with verified
+        """
+        converted, unit = convert_to_human(self.current)
+        if unit:
+            self.__progress = f"[V:{converted:>6.2f}{unit}"
+            return
+        self.__progress = f"[V:{converted:>7}"
+
+    def __write_downloaded(self) -> None:
+        """
+        Method to create progress string with downloaded info
+        """
+        converted, unit = convert_to_human(self.download)
+        if unit:
+            self.__download = f"|D:{converted:>6.2f}{unit}"
+            return
+        self.__download = f"|D:{converted:>7}"
+
+    def __write_total(self) -> None:
+        """
+        Method to set total string
+        """
+        converted, unit = convert_to_human(self.total)
+        if unit:
+            self.__total = f"|{converted:.2f}{unit}]"
+            return
+        self.__total = f"|{converted:>}]"
+
+    def __write_running_time(self) -> None:
+        """
+        Method to create running time string
+        """
+        h, m, s = self.times.running
+        self.__running_time = f"[R:{h:02}:{m:02}:{s:02}]"
+
+    def __write_estimate_time(self) -> None:
+        """
+        Method to create estimate string
+        """
+        h, m, s = self.estimate_time_left
+        self.__estimate_time = f"[E:{h:02}:{m:02}:{s:02}]"
+
+    def __write_avg_speed(self) -> None:
+        """
+        Method to format avg speed string
+        """
+        conveted, unit = convert_to_human(self.speed.avg_speed)
+        if unit:
+            self.__avg_speed = f"[{conveted:>5.1f}{unit} obj/s]"
+            return
+        self.__avg_speed = f"[{self.speed.avg_speed:>6.1f} obj/s]"
+
+    def __update_terminal_columns(self) -> None:
+        """
+        Method to update current terminal columns
+        """
+        self.__terminal_columns = os.get_terminal_size().columns
+
+    def __write_percents_done(self) -> None:
+        """
+        Method to calculate and save percents done string
+        """
+        percents_done = round(self.current * 100 / self.total, 2)
+        self.__percents_done = f"[{percents_done:6.2f}%]"
+
+    def __fill_empty_space(self, used_space: int) -> str:
+        """
+        Method to fill empty line space
+        :param int used_space: already used space on terminal
+        :rtype: str
+        :return: string to fill current line to the end
+        """
+        available_space = self.__terminal_columns - used_space
+        available_space -= 2
+        space_done = available_space * self.current // self.total
+        space_left = available_space - space_done
+        results = "["
+        results += self.markers.done * space_done
+        in_progress = 0
+        if space_left > 0:
+            results += self.markers.current_marker()
+            in_progress = 1
+        results += self.markers.filler * (space_left - in_progress)
+        results += "]"
+        return results
+
+    def __print_line(self) -> None:
+        """
+        Print progrss line to console
+        """
+        self.__update_terminal_columns()
+        line = []
+        line.append(str(self.__progress))
+        line.append(str(self.__download))
+        line.append(str(self.__total))
+        line.append(str(self.__percents_done))
+        line.append(str(self.__avg_speed))
+        line.append(str(self.__running_time))
+        line.append(str(self.__estimate_time))
+        line_length = len("".join(line))
+        if line_length < self.__terminal_columns:
+            line.insert(3, self.__fill_empty_space(line_length))
+
+        print(f"\r{''.join(line)}", end="", flush=True)
+
+    def __update_counters(self) -> None:
+        """
+        Method to update counters
+        """
+        self.__write_progress()
+        self.__write_downloaded()
+        self.__write_total()
+        self.__write_running_time()
+        self.__write_estimate_time()
+        self.__write_avg_speed()
+        self.__write_percents_done()
 
     def __del__(self) -> None:
-        sys.stdout.write("\n")
-        sys.stdout.flush()
+        """
+        Print end line
+        """
+        self.__update_counters()
+        self.__print_line()

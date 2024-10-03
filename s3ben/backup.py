@@ -17,7 +17,7 @@ from tabulate import tabulate  # type: ignore
 from typing_extensions import TypeAlias
 
 from s3ben.helpers import (
-    ProgressBar,
+    ProgressV2,
     check_object,
     convert_to_human,
     convert_to_human_v2,
@@ -131,21 +131,22 @@ class BackupManager:
             self._delay += 1
         return min(max_delay, self._delay)
 
-    def _progress(self) -> None:
-        progress = ProgressBar()
+    def __progress2(self) -> None:
+        """
+        Updated progress bar
+        """
         info = self._s3_client.get_bucket(self._bucket_name)
         total_objects = info["usage"]["rgw.main"]["num_objects"]
-        progress.total = total_objects
-        progress.draw()
-        while progress.total > progress.progress:
+        progress = ProgressV2(total=total_objects)
+        while True:
             try:
-                data = self._progress_queue.get(timeout=0.5)
+                data = self._progress_queue.get(block=True, timeout=0.1)
             except Empty:
-                progress.draw()
+                if self._end_event.is_set():
+                    break
                 continue
             else:
-                progress.progress = data
-                progress.draw()
+                progress.update_bar(data)
 
     def sync_bucket(
         self,
@@ -191,7 +192,7 @@ class BackupManager:
             processess.append(reader)
             processess.append(remapper)
             if not self._curses:
-                self._progress()
+                self.__progress2()
             else:
                 self._curses_ui()
             for proc in processess:
@@ -285,8 +286,8 @@ class BackupManager:
                     if not obj_size_matches:
                         download_list.append(key)
                         continue
-            skipped = len(data) - len(download_list)
-            progress_update = {"skipped": skipped}
+            skipped = len(data)
+            progress_update = {"vrf": skipped}
             self._progress_queue.put(progress_update)
             if len(download_list) > 0:
                 self._download_queue.put(download_list)
@@ -344,7 +345,7 @@ class BackupManager:
                 continue
             else:
                 self._s3_client.download_all_objects(self._bucket_name, data)
-                progress_update = {"downloaded": len(data)}
+                progress_update = {"dl": len(data)}
                 self._progress_queue.put(progress_update)
 
     def list_buckets(

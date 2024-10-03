@@ -12,3 +12,6 @@ clean:
 publish:
 	poetry build
 	poetry publish
+
+test:
+	poetry run s3ben --log-level debug --config etc/s3ben.conf test

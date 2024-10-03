@@ -363,3 +363,27 @@ def consume(config: dict, parsed_args: Namespace) -> None:
         except (KeyboardInterrupt, SystemExit):
             for proc in processes:
                 proc.terminate()
+
+
+@command(parent=subparser)  # type: ignore
+def test(config: dict, *_) -> None:
+    """
+    Test cli option
+    """
+    import time
+
+    from s3ben.helpers import ProgressV2
+
+    total = 9930000
+    progress = ProgressV2(total)
+    for i in range(total):
+        try:
+            dl = 0
+            value = {"vrf": 1}
+            if i % 3 == 0:
+                dl = 1
+                value = {"dl": dl}
+            progress.update_bar(value)
+            # time.sleep(0.001)
+        except KeyboardInterrupt:
+            break

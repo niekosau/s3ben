@@ -286,7 +286,7 @@ class BackupManager:
                     if not obj_size_matches:
                         download_list.append(key)
                         continue
-            skipped = len(data)
+            skipped = len(data) - len(download_list)
             progress_update = {"vrf": skipped}
             self._progress_queue.put(progress_update)
             if len(download_list) > 0:

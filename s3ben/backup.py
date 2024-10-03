@@ -197,6 +197,9 @@ class BackupManager:
                 self._curses_ui()
             for proc in processess:
                 proc.join()
+        except KeyboardInterrupt:
+            for proc in processess:
+                proc.terminate()
         finally:
             proc_manager.shutdown()
         end = time.perf_counter()

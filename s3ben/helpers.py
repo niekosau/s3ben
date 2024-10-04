@@ -117,8 +117,8 @@ class ProgressSpeed:
     Class to calculate avg and estimate time
     """
 
-    def __init__(self) -> None:
-        self.__speed_history = [0.0 for _ in range(5)]
+    def __init__(self, avg_interval: int) -> None:
+        self.__speed_history = [0.0 for _ in range(avg_interval)]
         self.__next_update: int = int(time.perf_counter()) + 1
         self.__current_update: int = 0
         self._speed: float = 0
@@ -219,15 +219,17 @@ class ProgressTimings:
         self._next_update += value
 
 
+# TODO: Split this class to data only and consol decoration
+# TODO: Use threads for calculating and painting
 class ProgressV2:
     """
     Dataclass to represent progress in console
     """
 
-    def __init__(self, total: int) -> None:
+    def __init__(self, total: int, avg_interval: int) -> None:
         self.times = ProgressTimings()
         self.markers = ProgressMarkers()
-        self.speed = ProgressSpeed()
+        self.speed = ProgressSpeed(avg_interval=avg_interval)
         self._total = total
         self._current: int = 0
         self._download: int = 0

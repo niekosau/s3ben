@@ -187,6 +187,12 @@ def setup(config: dict, *_) -> None:
             help="Use experimental ui, default: %(default)s",
             action="store_true",
         ),
+        argument(
+            "--avg-interval",
+            help="Amount of seconds for calculating avg speed, default: %(default)d",
+            type=int,
+            default=30,
+        ),
     ],
     parent=subparser,  # type: ignore
 )
@@ -194,6 +200,9 @@ def sync(config: dict, parsed_args: Namespace):
     """
     Entry point for sync cli option
     """
+    if not 2 <= parsed_args.avg_interval <= 60:
+        _logger.error("Avg interval must be between 2 and 60")
+        return
     _logger.debug("Initializing sync")
     s3 = config.pop("s3")
     s3.pop("exclude")
@@ -216,6 +225,7 @@ def sync(config: dict, parsed_args: Namespace):
         parsed_args.checkers,
         parsed_args.skip_checksum,
         parsed_args.skip_filesize,
+        avg_interval=parsed_args.avg_interval,
     )
 
 

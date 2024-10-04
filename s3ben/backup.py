@@ -131,13 +131,13 @@ class BackupManager:
             self._delay += 1
         return min(max_delay, self._delay)
 
-    def __progress2(self) -> None:
+    def __progress2(self, avg_interval: int) -> None:
         """
         Updated progress bar
         """
         info = self._s3_client.get_bucket(self._bucket_name)
         total_objects = info["usage"]["rgw.main"]["num_objects"]
-        progress = ProgressV2(total=total_objects)
+        progress = ProgressV2(total=total_objects, avg_interval=avg_interval)
         while True:
             try:
                 data = self._progress_queue.get(block=True, timeout=0.1)
@@ -156,6 +156,7 @@ class BackupManager:
         checkers: int,
         skip_checksum: bool,
         skip_filesize: bool,
+        avg_interval: int,
     ) -> None:
         _logger.info("Starting bucket sync")
         start = time.perf_counter()
@@ -192,7 +193,7 @@ class BackupManager:
             processess.append(reader)
             processess.append(remapper)
             if not self._curses:
-                self.__progress2()
+                self.__progress2(avg_interval=avg_interval)
             else:
                 self._curses_ui()
             for proc in processess:

@@ -182,6 +182,7 @@ def setup(config: dict, *_) -> None:
             type=int,
             default=1000,
         ),
+        # TODO: Not working currently, as progress data was changed, needs update
         argument(
             "--ui",
             help="Use experimental ui, default: %(default)s",
@@ -191,7 +192,13 @@ def setup(config: dict, *_) -> None:
             "--avg-interval",
             help="Amount of seconds for calculating avg speed, default: %(default)d",
             type=int,
-            default=30,
+            default=60,
+        ),
+        argument(
+            "--update-interval",
+            help="Progress bar update interval, default: %(default)d",
+            type=int,
+            default=1,
         ),
     ],
     parent=subparser,  # type: ignore
@@ -226,6 +233,7 @@ def sync(config: dict, parsed_args: Namespace):
         parsed_args.skip_checksum,
         parsed_args.skip_filesize,
         avg_interval=parsed_args.avg_interval,
+        update_interval=parsed_args.update_interval,
     )
 
 
@@ -373,27 +381,3 @@ def consume(config: dict, parsed_args: Namespace) -> None:
         except (KeyboardInterrupt, SystemExit):
             for proc in processes:
                 proc.terminate()
-
-
-@command(parent=subparser)  # type: ignore
-def test(config: dict, *_) -> None:
-    """
-    Test cli option
-    """
-    import time
-
-    from s3ben.helpers import ProgressV2
-
-    total = 9930000
-    progress = ProgressV2(total)
-    for i in range(total):
-        try:
-            dl = 0
-            value = {"vrf": 1}
-            if i % 3 == 0:
-                dl = 1
-                value = {"dl": dl}
-            progress.update_bar(value)
-            # time.sleep(0.001)
-        except KeyboardInterrupt:
-            break

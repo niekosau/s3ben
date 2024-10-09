@@ -6,6 +6,7 @@ import hashlib
 import multiprocessing
 import os
 import shutil
+import threading
 import time
 from datetime import datetime, timedelta
 from logging import getLogger
@@ -17,12 +18,12 @@ from tabulate import tabulate  # type: ignore
 from typing_extensions import TypeAlias
 
 from s3ben.helpers import (
-    ProgressV2,
     check_object,
     convert_to_human,
     convert_to_human_v2,
     drop_privileges,
 )
+from s3ben.progress import ConsoleBar
 from s3ben.rabbit import MqConnection, RabbitMQ
 from s3ben.remapper import ResolveRemmaping
 from s3ben.s3 import S3Events
@@ -131,13 +132,19 @@ class BackupManager:
             self._delay += 1
         return min(max_delay, self._delay)
 
-    def __progress2(self, avg_interval: int) -> None:
+    def __progress2(self, avg_interval: int, update_interval: int) -> None:
         """
         Updated progress bar
         """
         info = self._s3_client.get_bucket(self._bucket_name)
         total_objects = info["usage"]["rgw.main"]["num_objects"]
-        progress = ProgressV2(total=total_objects, avg_interval=avg_interval)
+        progress = ConsoleBar(
+            total=total_objects,
+            avg_interval=avg_interval,
+            exit_event_queue=self._end_event,
+        )
+        decoration = threading.Thread(target=progress.draw_bar, args=(update_interval,))
+        decoration.start()
         while True:
             try:
                 data = self._progress_queue.get(block=True, timeout=0.1)
@@ -146,7 +153,7 @@ class BackupManager:
                     break
                 continue
             else:
-                progress.update_bar(data)
+                progress.data.update_counters(data)
 
     def sync_bucket(
         self,
@@ -157,6 +164,7 @@ class BackupManager:
         skip_checksum: bool,
         skip_filesize: bool,
         avg_interval: int,
+        update_interval: int,
     ) -> None:
         _logger.info("Starting bucket sync")
         start = time.perf_counter()
@@ -193,7 +201,9 @@ class BackupManager:
             processess.append(reader)
             processess.append(remapper)
             if not self._curses:
-                self.__progress2(avg_interval=avg_interval)
+                self.__progress2(
+                    avg_interval=avg_interval, update_interval=update_interval
+                )
             else:
                 self._curses_ui()
             for proc in processess:

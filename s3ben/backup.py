@@ -5,9 +5,11 @@ Backup manager module
 import hashlib
 import multiprocessing
 import os
+import pathlib
 import shutil
 import threading
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from logging import getLogger
 from multiprocessing.synchronize import Event as EventClass
@@ -32,6 +34,16 @@ from s3ben.ui import S3benGui
 _logger = getLogger(__name__)
 Queue: TypeAlias = multiprocessing.Queue
 Event: TypeAlias = EventClass
+Path: TypeAlias = pathlib.Path
+
+
+class Manager:
+    """
+    Base class to manage simple things
+    """
+
+    def __init__(self) -> None:
+        self._buckets: Union[list, None] = None
 
 
 class BackupManager:
@@ -155,6 +167,7 @@ class BackupManager:
             else:
                 progress.data.update_counters(data)
 
+    # TODO: Check what's missing in new sync version and remove
     def sync_bucket(
         self,
         bucket_name: str,

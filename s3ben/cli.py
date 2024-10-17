@@ -17,10 +17,11 @@ from s3ben.arguments import base_args
 from s3ben.backup import BackupManager
 from s3ben.config import parse_config
 from s3ben.decorators import argument, command
+from s3ben.helpers import drop_privileges
 from s3ben.logger import init_logger
 from s3ben.rabbit import MqConnection, MqExQue, RabbitMQ
 from s3ben.remapper import ResolveRemmaping
-from s3ben.s3 import S3Config, S3Events
+from s3ben.s3 import BackupLocations, Bucket, S3Clients, S3Config, S3Events, S3manager
 from s3ben.sentry import init_sentry
 
 _logger = getLogger(__name__)
@@ -45,6 +46,7 @@ def main() -> None:
         _logger.debug("Initializing sentry")
         init_sentry(config=parsed_args.sentry_conf)
     config = parse_config(parsed_args.config)
+    drop_privileges(user=config["s3ben"].get("user"))
     parsed_args.func(config, parsed_args)
 
 
@@ -78,7 +80,6 @@ def run_consumer(end_event: Event, data_queue: Queue, config: dict) -> None:
 
     backup_root = main_section.pop("backup_root")
     s3 = config.pop("s3")
-    s3.pop("exclude")
     s3_config = S3Config(**s3)
     s3_events = S3Events(
         config=s3_config,
@@ -105,7 +106,7 @@ def exclude_list(config: dict) -> list:
     """
     if "exclude" not in config["s3"].keys():
         return []
-    exclude = config["s3"].pop("exclude").replace('"', "").replace("'", "").split(",")
+    exclude = config["s3"].get("exclude").replace('"', "").replace("'", "").split(",")
     return [b.strip() for b in exclude]
 
 
@@ -159,82 +160,82 @@ def setup(config: dict, *_) -> None:
         s3_events.create_notification(bucket=bucket, exchange=mq_ex_queue.exchange)
 
 
-@command(
-    [
-        argument("--bucket", required=True, help="Bucket name which to sync", type=str),
-        argument(
-            "--transfers",
-            help="Number of transfer processes, default: %(default)d",
-            type=int,
-            default=4,
-        ),
-        argument(
-            "--checkers",
-            help="Number of checker processes, default: %(default)d",
-            type=int,
-            default=4,
-        ),
-        argument("--skip-checksum", help="Skip checksum check", action="store_true"),
-        argument("--skip-filesize", help="Skip filesize check", action="store_true"),
-        argument(
-            "--page-size",
-            help="Bucket object page size, default: %(default)s",
-            type=int,
-            default=1000,
-        ),
-        # TODO: Not working currently, as progress data was changed, needs update
-        argument(
-            "--ui",
-            help="Use experimental ui, default: %(default)s",
-            action="store_true",
-        ),
-        argument(
-            "--avg-interval",
-            help="Amount of seconds for calculating avg speed, default: %(default)d",
-            type=int,
-            default=60,
-        ),
-        argument(
-            "--update-interval",
-            help="Progress bar update interval, default: %(default)d",
-            type=int,
-            default=1,
-        ),
-    ],
-    parent=subparser,  # type: ignore
-)
-def sync(config: dict, parsed_args: Namespace):
-    """
-    Entry point for sync cli option
-    """
-    if not 2 <= parsed_args.avg_interval <= 60:
-        _logger.error("Avg interval must be between 2 and 60")
-        return
-    _logger.debug("Initializing sync")
-    s3 = config.pop("s3")
-    s3.pop("exclude")
-    s3_config = S3Config(**s3)
-    backup_root = config["s3ben"].pop("backup_root")
-    s3_events = S3Events(
-        config=s3_config,
-        backup_root=backup_root,
-    )
-    backup = BackupManager(
-        backup_root=backup_root,
-        user=config["s3ben"].pop("user"),
-        s3_client=s3_events,
-        curses=parsed_args.ui,
-    )
-    backup.sync_bucket(
-        parsed_args.bucket,
-        parsed_args.transfers,
-        parsed_args.page_size,
-        parsed_args.checkers,
-        parsed_args.skip_checksum,
-        parsed_args.skip_filesize,
-        avg_interval=parsed_args.avg_interval,
-        update_interval=parsed_args.update_interval,
-    )
+# @command(
+#     [
+#         argument("--bucket", required=True, help="Bucket name which to sync", type=str),
+#         argument(
+#             "--transfers",
+#             help="Number of transfer processes, default: %(default)d",
+#             type=int,
+#             default=4,
+#         ),
+#         argument(
+#             "--checkers",
+#             help="Number of checker processes, default: %(default)d",
+#             type=int,
+#             default=4,
+#         ),
+#         argument("--skip-checksum", help="Skip checksum check", action="store_true"),
+#         argument("--skip-filesize", help="Skip filesize check", action="store_true"),
+#         argument(
+#             "--page-size",
+#             help="Bucket object page size, default: %(default)s",
+#             type=int,
+#             default=1000,
+#         ),
+#         # TODO: Not working currently, as progress data was changed, needs update
+#         argument(
+#             "--ui",
+#             help="Use experimental ui, default: %(default)s",
+#             action="store_true",
+#         ),
+#         argument(
+#             "--avg-interval",
+#             help="Amount of seconds for calculating avg speed, default: %(default)d",
+#             type=int,
+#             default=60,
+#         ),
+#         argument(
+#             "--update-interval",
+#             help="Progress bar update interval, default: %(default)d",
+#             type=int,
+#             default=1,
+#         ),
+#     ],
+#     parent=subparser,  # type: ignore
+# )
+# def sync_old(config: dict, parsed_args: Namespace):
+#     """
+#     Entry point for sync cli option
+#     """
+#     if not 2 <= parsed_args.avg_interval <= 60:
+#         _logger.error("Avg interval must be between 2 and 60")
+#         return
+#     _logger.debug("Initializing sync")
+#     s3 = config.pop("s3")
+#     s3.pop("exclude")
+#     s3_config = S3Config(**s3)
+#     backup_root = config["s3ben"].pop("backup_root")
+#     s3_events = S3Events(
+#         config=s3_config,
+#         backup_root=backup_root,
+#     )
+#     backup = BackupManager(
+#         backup_root=backup_root,
+#         user=config["s3ben"].pop("user"),
+#         s3_client=s3_events,
+#         curses=parsed_args.ui,
+#     )
+#     backup.sync_bucket(
+#         parsed_args.bucket,
+#         parsed_args.transfers,
+#         parsed_args.page_size,
+#         parsed_args.checkers,
+#         parsed_args.skip_checksum,
+#         parsed_args.skip_filesize,
+#         avg_interval=parsed_args.avg_interval,
+#         update_interval=parsed_args.update_interval,
+#     )
 
 
 @command(
@@ -381,3 +382,116 @@ def consume(config: dict, parsed_args: Namespace) -> None:
         except (KeyboardInterrupt, SystemExit):
             for proc in processes:
                 proc.terminate()
+
+
+@command(
+    [
+        argument("bucket", help="Bucket name", type=str),
+        argument(
+            "--processes",
+            help="Number of check processes, default: %(default)s",
+            default=4,
+            type=int,
+        ),
+        argument(
+            "--page-size",
+            help="Number of files in one batch, default: %(default)s",
+            default=1000,
+            type=int,
+        ),
+        argument("--save-to-file", help="Save list to file", type=str),
+    ],
+    parent=subparser,  # type: ignore
+    cmd_aliases=["verify"],
+)
+def verify_files(config: dict, parsed_args: Namespace) -> None:
+    """
+    Cli option to verify files in backup and destination
+    """
+    # TODO: Not finished
+    kwargs = {}
+    if parsed_args.save_to_file:
+        kwargs.update({"save_to_file": parsed_args.save_to_file})
+    locations = BackupLocations(root=config["s3ben"].pop("backup_root"))
+    s3 = config.pop("s3")
+    s3_config = S3Config(**s3)
+    bucket = Bucket(name=parsed_args.bucket, locations=locations, s3_config=s3_config)
+    manager = S3manager(bucket=bucket)
+    manager.verify_files(
+        n_proc=parsed_args.processes, batch_size=parsed_args.page_size, **kwargs
+    )
+
+
+@command(
+    [
+        argument("bucket", help="Bucket name", type=str),
+        argument(
+            "--transfers",
+            help="Download transfers to start, default: %(default)s",
+            default=4,
+            type=int,
+        ),
+        argument(
+            "--batch-size",
+            help="Batch size for one process, default: %(default)s",
+            default=1000,
+            type=int,
+        ),
+    ],
+    parent=subparser,  # type: ignore
+)
+def sync(config: dict, parsed_args: Namespace) -> None:
+    """
+    Sync S3 objects to local file system
+    """
+    locations = BackupLocations(root=config["s3ben"].pop("backup_root"))
+    s3 = config.pop("s3")
+    s3_config = S3Config(**s3)
+    src_bucket = Bucket(
+        name=parsed_args.bucket, locations=locations, s3_config=s3_config
+    )
+    manager = S3manager(bucket=src_bucket)
+    manager.sync_from_s3(
+        n_proc=parsed_args.transfers, batch_size=parsed_args.batch_size
+    )
+
+
+@command(
+    [
+        argument("bucket", help="Bucket name from backup", type=str),
+        argument("--dst-bucket", help="Destination bucket", type=str),
+        argument(
+            "--transfers",
+            help="Upload transfers to start, default: %(default)s",
+            default=4,
+            type=int,
+        ),
+        argument(
+            "--batch-size",
+            help="Batch size for one process, default: %(default)s",
+            default=10,
+            type=int,
+        ),
+    ],
+    parent=subparser,  # type: ignore
+)
+def restore(config: dict, parsed_args: Namespace) -> None:
+    """
+    Sync local files to S3 bucket
+    """
+    locations = BackupLocations(root=config["s3ben"].pop("backup_root"))
+    s3 = config.pop("s3")
+    s3_config = S3Config(**s3)
+    src_bucket = Bucket(
+        name=parsed_args.bucket, locations=locations, s3_config=s3_config
+    )
+    dst_bucket_name = (
+        parsed_args.dst_bucket if parsed_args.dst_bucket else parsed_args.bucket
+    )
+    dst_bucket = Bucket(name=dst_bucket_name, locations=locations, s3_config=s3_config)
+    manager = S3manager(bucket=src_bucket)
+    manager.sync_from_backup(
+        n_proc=parsed_args.transfers,
+        batch_size=parsed_args.batch_size,
+        dst_bucket=dst_bucket,
+    )

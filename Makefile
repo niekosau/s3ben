@@ -1,7 +1,7 @@
 default: run
 
 run:
-	poetry lock
+	# poetry lock
 	poetry install
 	poetry run s3ben --log-level debug --config etc/s3ben.conf $(args)
 
@@ -14,4 +14,8 @@ publish:
 	poetry publish
 
 test:
-	poetry run s3ben --log-level debug --config etc/s3ben.conf test
+	poetry run s3ben --log-level warning --config etc/s3ben.conf test $(args)
+
+verify:
+	poetry install
+	poetry run s3ben --log-level warning --config etc/s3ben.conf verify $(args)

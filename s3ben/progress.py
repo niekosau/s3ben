@@ -4,6 +4,7 @@ Module to collect and visualise progress
 
 import multiprocessing
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from logging import getLogger
@@ -16,7 +17,7 @@ from s3ben.helpers import convert_to_human
 
 _logger = getLogger(__name__)
 Queue: TypeAlias = multiprocessing.Queue
-Event: TypeAlias = EventClass
+Event: TypeAlias = threading.Event
 
 
 @dataclass
@@ -140,6 +141,14 @@ class ProgressV2:
         """
         return self._total
 
+    @total.setter
+    def total(self, value: int) -> None:
+        """
+        Method to updat total value
+        :param int value: new total value
+        """
+        self._total = value
+
     @property
     def current(self) -> int:
         """
@@ -174,7 +183,10 @@ class ProgressV2:
         """
         Property to calculate and return percents done
         """
-        return round(self.current * 100 / self.total, 2)
+        try:
+            return round(self.current * 100 / self.total, 2)
+        except ZeroDivisionError:
+            return 0
 
     def update_counters(self, value: dict) -> None:
         """
@@ -185,8 +197,10 @@ class ProgressV2:
         if "dl" in value.keys():
             dl = value.pop("dl")
             self._download += dl
-        else:
+        elif "vrf" in value.keys():
             vrf = value.pop("vrf")
+        elif "total" in value.keys():
+            self.total += value.pop("total")
         self._current += vrf + dl
         self.speed.speed = dl + vrf
 
@@ -200,7 +214,7 @@ class ConsoleBar:
         self.data = ProgressV2(total=total, avg_interval=avg_interval)
         t, u = convert_to_human(self.data.total)
         self.__terminal_columns: int = os.get_terminal_size().columns
-        self.__total = f"T {t:.2f}{u}" if u else f"T {t}"
+        self.__total = f"T {t:6.2f}{u}" if u else f"T {t:7}"
         self.__progress: str = f"[V {0:7}|D {0:7}|{self.__total}]"
         self.__time: str = f"[R {0:02}:{0:02}:{0:02}][E {99:02}:{59:02}:{59:02}]"
         self.__percents: str = f"[{0:6.2f}%]"
@@ -222,6 +236,7 @@ class ConsoleBar:
         self.__write_avg_speed()
         self.__write_percents_done()
         self.__write_preffix()
+        self.__write_total()
         p_bar = []
         p_bar.append(self.__progress)
         p_bar.append(self.__percents)
@@ -241,7 +256,10 @@ class ConsoleBar:
         """
         available_space = self.__terminal_columns - used_space
         available_space -= 4
-        space_done = available_space * self.data.current // self.data.total
+        try:
+            space_done = available_space * self.data.current // self.data.total
+        except ZeroDivisionError:
+            space_done = 0
         space_left = available_space - space_done
         results = "["
         results += self.data.markers.done * space_done
@@ -252,6 +270,13 @@ class ConsoleBar:
         results += self.data.markers.filler * (space_left - in_progress)
         results += "]"
         return results
+
+    def __write_total(self) -> None:
+        """
+        Method to update total part
+        """
+        t, u = convert_to_human(self.data.total)
+        self.__total = f"T {t:6.2f}{u}" if u else f"T {t:7}"
 
     def __write_time(self) -> None:
         """
